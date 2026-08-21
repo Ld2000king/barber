@@ -10,17 +10,18 @@ const defaultPrices:PriceItem[]=[{id:"p1",name:"תספורת גבר",price:70,no
 const defaultProducts:Product[]=[{id:"s1",name:"ווקס מט",price:55,description:"אחיזה חזקה ללא ברק"},{id:"s2",name:"שמן לזקן",price:65,description:"ריכוך, הזנה וריח נקי"},{id:"s3",name:"ספריי מלח",price:60,description:"נפח ומרקם טבעי"}];
 const uid=()=>Math.random().toString(36).slice(2,9);
 const money=(value:number)=>`${value.toLocaleString("he-IL")} ₪`;
+function compressImage(file:File){return new Promise<string>((resolve,reject)=>{const image=new Image(),reader=new FileReader();reader.onload=()=>{image.onload=()=>{const max=960,scale=Math.min(1,max/Math.max(image.width,image.height)),canvas=document.createElement("canvas");canvas.width=Math.round(image.width*scale);canvas.height=Math.round(image.height*scale);canvas.getContext("2d")?.drawImage(image,0,0,canvas.width,canvas.height);resolve(canvas.toDataURL("image/jpeg",.72))};image.onerror=reject;image.src=String(reader.result)};reader.onerror=reject;reader.readAsDataURL(file)})}
 
 export default function Home(){
  const [business,setBusiness]=useState(defaultBusiness),[prices,setPrices]=useState(defaultPrices),[products,setProducts]=useState(defaultProducts),[gallery,setGallery]=useState<string[]>([]);
  const [adminOpen,setAdminOpen]=useState(false),[activeTab,setActiveTab]=useState<"details"|"prices"|"products"|"gallery">("details"),[toast,setToast]=useState("");
  const fileInput=useRef<HTMLInputElement>(null);
  useEffect(()=>{const stored=localStorage.getItem("barbera-content-v1");if(stored){try{const p=JSON.parse(stored);if(p.business)setBusiness(p.business);if(p.prices)setPrices(p.prices);if(p.products)setProducts(p.products);if(p.gallery)setGallery(p.gallery)}catch{}}if("serviceWorker" in navigator)navigator.serviceWorker.register("/sw.js").catch(()=>undefined)},[]);
- useEffect(()=>{localStorage.setItem("barbera-content-v1",JSON.stringify({business,prices,products,gallery}))},[business,prices,products,gallery]);
+ useEffect(()=>{try{localStorage.setItem("barbera-content-v1",JSON.stringify({business,prices,products,gallery}))}catch{setToast("אין מספיק מקום לשמירת תמונות נוספות")}},[business,prices,products,gallery]);
  useEffect(()=>{if(!toast)return;const t=setTimeout(()=>setToast(""),2400);return()=>clearTimeout(t)},[toast]);
  const googleMaps=useMemo(()=>`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(business.mapQuery)}`,[business.mapQuery]);
  const waze=useMemo(()=>`https://waze.com/ul?q=${encodeURIComponent(business.mapQuery)}&navigate=yes`,[business.mapQuery]);
- function handleImages(e:ChangeEvent<HTMLInputElement>){const files=Array.from(e.target.files??[]).slice(0,Math.max(0,8-gallery.length));Promise.all(files.map(file=>new Promise<string>((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.onerror=reject;reader.readAsDataURL(file)}))).then(images=>{setGallery(current=>[...current,...images].slice(0,8));setToast("התמונות נשמרו במכשיר")}).catch(()=>setToast("לא הצלחנו לקרוא את התמונה"));e.target.value=""}
+ function handleImages(e:ChangeEvent<HTMLInputElement>){const files=Array.from(e.target.files??[]).slice(0,Math.max(0,8-gallery.length));Promise.all(files.map(compressImage)).then(images=>{setGallery(current=>[...current,...images].slice(0,8));setToast("התמונות נשמרו במכשיר")}).catch(()=>setToast("לא הצלחנו לקרוא את התמונה"));e.target.value=""}
  function saveDetails(e:FormEvent<HTMLFormElement>){e.preventDefault();const v=new FormData(e.currentTarget);setBusiness({name:String(v.get("name")),tagline:String(v.get("tagline")),phone:String(v.get("phone")),whatsapp:String(v.get("whatsapp")),address:String(v.get("address")),mapQuery:String(v.get("mapQuery")),hours:String(v.get("hours"))});setToast("פרטי העסק נשמרו")}
  return <main>
   <header className="topbar"><a className="brand" href="#top"><span className="brand-mark">B</span><span>{business.name}</span></a><button className="admin-button" onClick={()=>setAdminOpen(true)}><span className="admin-dot"/>ניהול</button></header>
