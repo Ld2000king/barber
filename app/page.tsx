@@ -35,9 +35,7 @@ export default function Home(){
   <header className="app-header"><button className="mini-logo" onClick={()=>openTab("home")}>B</button><strong>{business.name}</strong><button className="manage-link" onClick={()=>setAdminOpen(true)}>ניהול</button></header>
 
   {tab==="home"&&<div className="screen home-screen">
-   <section className={`cover ${gallery[0]?"has-photo":""}`} style={gallery[0]?{backgroundImage:`linear-gradient(180deg,transparent 40%,rgba(0,0,0,.45)),url(${gallery[0]})`}:undefined}>
-    {!gallery[0]&&<div className="cover-placeholder"><span>B</span><small>YOUR PHOTO HERE</small></div>}
-   </section>
+   <section className={`cover ${gallery[0]?"has-photo":"default-cover"}`} style={gallery[0]?{backgroundImage:`linear-gradient(180deg,transparent 40%,rgba(0,0,0,.45)),url(${gallery[0]})`}:{backgroundImage:"linear-gradient(180deg,transparent 45%,rgba(0,0,0,.5)),url(/og.png)"}}/>
    <section className="quick-actions">
     <a href={mapUrl} target="_blank" rel="noreferrer"><i>{icons.pin}</i><span>איך מגיעים</span></a>
     <button onClick={()=>{setToast(business.hours)}}><i>{icons.clock}</i><span>שעות פעילות</span></button>
