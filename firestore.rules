@@ -1,0 +1,86 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    function isBarber() {
+      return signedIn()
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "barber";
+    }
+
+    match /users/{userId} {
+      allow create: if isOwner(userId)
+        && request.resource.data.role == "client";
+      allow read: if isOwner(userId) || isBarber();
+      allow update: if isBarber()
+        || (isOwner(userId)
+          && request.resource.data.role == resource.data.role
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(["name", "phone", "updatedAt"]));
+      allow delete: if isBarber();
+    }
+
+    match /businesses/{businessId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isBarber();
+    }
+
+    match /appointments/{appointmentId} {
+      allow read: if isBarber()
+        || (signedIn() && resource.data.clientId == request.auth.uid);
+      allow create: if isBarber()
+        || (signedIn()
+          && request.resource.data.clientId == request.auth.uid
+          && request.resource.data.status == "confirmed"
+          && getAfter(/databases/$(database)/documents/availability/$(request.resource.data.slotId)).data.appointmentId == appointmentId);
+      allow update: if isBarber()
+        || (signedIn()
+          && resource.data.clientId == request.auth.uid
+          && request.resource.data.clientId == resource.data.clientId
+          && request.resource.data.status == "cancelled"
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(["status", "updatedAt"]));
+      allow delete: if isBarber();
+    }
+
+    match /availability/{slotId} {
+      allow read: if signedIn();
+      allow create: if isBarber()
+        || (signedIn()
+          && request.resource.data.status == "booked"
+          && getAfter(/databases/$(database)/documents/appointments/$(request.resource.data.appointmentId)).data.clientId == request.auth.uid
+          && getAfter(/databases/$(database)/documents/appointments/$(request.resource.data.appointmentId)).data.slotId == slotId);
+      allow update: if isBarber();
+      allow delete: if isBarber()
+        || (signedIn()
+          && getAfter(/databases/$(database)/documents/appointments/$(resource.data.appointmentId)).data.clientId == request.auth.uid
+          && getAfter(/databases/$(database)/documents/appointments/$(resource.data.appointmentId)).data.status == "cancelled");
+    }
+
+    match /services/{serviceId} {
+      allow read: if signedIn();
+      allow write: if isBarber();
+    }
+
+    match /products/{productId} {
+      allow read: if signedIn();
+      allow write: if isBarber();
+    }
+
+    match /gallery/{photoId} {
+      allow read: if signedIn();
+      allow write: if isBarber();
+    }
+
+    match /broadcasts/{messageId} {
+      allow read, write: if isBarber();
+    }
+  }
+}
