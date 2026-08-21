@@ -3,7 +3,7 @@ import {getAuth} from "firebase/auth";
 import {getFirestore} from "firebase/firestore";
 
 const firebaseConfig={
- apiKey:"AIzaSyDWkqBjjj2tIAZJ8l_ZyGjDxP0YN4zpOH4",
+ apiKey:"AIzaSyDWkqBjJj2tIA7J8l_7yGjDxP0YN4zpOH4",
  authDomain:"barber-1-8b58b.firebaseapp.com",
  projectId:"barber-1-8b58b",
  storageBucket:"barber-1-8b58b.firebasestorage.app",
