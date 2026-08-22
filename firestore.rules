@@ -15,13 +15,10 @@ service cloud.firestore {
     }
 
     function isBarber() {
-      return signedIn()
-        && userProfile().data.role == "barber";
+      return signedIn() && userProfile().data.role == "barber";
     }
 
-    // Existing Ari Cohen barber accounts predate multi-tenancy. Keeping this
-    // fallback makes the migration backwards-compatible until shopId is added.
-    function barberShopId() {
+    function userShopId() {
       return userProfile().data.keys().hasAny(["shopId"])
         ? userProfile().data.shopId
         : "ari-cohen";
@@ -33,54 +30,73 @@ service cloud.firestore {
         : "ari-cohen";
     }
 
+    function belongsToUserShop(data) {
+      return signedIn() && userShopId() == dataShopId(data);
+    }
+
     function barberOwnsShop(shopId) {
-      return isBarber() && barberShopId() == shopId;
+      return isBarber() && userShopId() == shopId;
     }
 
     function barberOwnsData(data) {
-      return isBarber() && barberShopId() == dataShopId(data);
+      return isBarber() && userShopId() == dataShopId(data);
+    }
+
+    match /barberCodes/{code} {
+      // The code is intentionally readable before login so a new client can
+      // resolve the correct shop before creating their account.
+      allow read: if true;
+      allow create: if signedIn()
+        && isBarber()
+        && request.resource.data.shopId == userShopId();
+      allow update: if false;
+      allow delete: if isBarber() && resource.data.shopId == userShopId();
     }
 
     match /users/{userId} {
-      // TESTING: self-service signup can create either a client or barber
-      // profile. Before production, barber creation should move behind an
-      // owner/admin invite or trusted backend.
+      // TESTING: self-service signup can create either a client or barber.
       allow create: if isOwner(userId)
         && request.resource.data.role in ["client", "barber"]
-        && (request.resource.data.role == "client"
-          || (request.resource.data.keys().hasAll(["shopId"])
-            && request.resource.data.shopId is string
-            && request.resource.data.shopId.size() >= 3));
+        && request.resource.data.keys().hasAll(["shopId"])
+        && request.resource.data.shopId is string
+        && request.resource.data.shopId.size() >= 3
+        && (request.resource.data.role == "barber"
+          || (request.resource.data.keys().hasAll(["barberCode"])
+            && exists(/databases/$(database)/documents/barberCodes/$(request.resource.data.barberCode))
+            && get(/databases/$(database)/documents/barberCodes/$(request.resource.data.barberCode)).data.shopId == request.resource.data.shopId));
       allow read: if isOwner(userId);
       allow update: if isOwner(userId)
         && request.resource.data.role == resource.data.role
-        && (!resource.data.keys().hasAny(["shopId"])
-          || request.resource.data.shopId == resource.data.shopId)
+        && request.resource.data.shopId == resource.data.shopId
         && request.resource.data.diff(resource.data).affectedKeys()
           .hasOnly(["name", "phone", "updatedAt"]);
       allow delete: if false;
     }
 
     match /businesses/{businessId} {
-      allow read: if signedIn();
+      allow read: if signedIn() && userShopId() == businessId;
       allow create, update, delete: if barberOwnsShop(businessId);
     }
 
     match /appointments/{appointmentId} {
       allow read: if barberOwnsData(resource.data)
-        || (signedIn() && resource.data.clientId == request.auth.uid);
+        || (signedIn()
+          && resource.data.clientId == request.auth.uid
+          && belongsToUserShop(resource.data));
 
       allow create: if barberOwnsData(request.resource.data)
         || (signedIn()
           && request.resource.data.clientId == request.auth.uid
+          && belongsToUserShop(request.resource.data)
           && request.resource.data.status == "confirmed"
           && getAfter(/databases/$(database)/documents/availability/$(request.resource.data.slotId)).data.appointmentId == appointmentId
-          && dataShopId(getAfter(/databases/$(database)/documents/availability/$(request.resource.data.slotId)).data) == dataShopId(request.resource.data));
+          && dataShopId(getAfter(/databases/$(database)/documents/availability/$(request.resource.data.slotId)).data) == userShopId());
 
       allow update: if (barberOwnsData(resource.data)
           && dataShopId(request.resource.data) == dataShopId(resource.data))
         || (signedIn()
           && resource.data.clientId == request.auth.uid
+          && belongsToUserShop(resource.data)
           && request.resource.data.clientId == resource.data.clientId
           && dataShopId(request.resource.data) == dataShopId(resource.data)
           && request.resource.data.status == "cancelled"
@@ -91,38 +107,40 @@ service cloud.firestore {
     }
 
     match /availability/{slotId} {
-      allow read: if signedIn();
+      allow read: if signedIn() && belongsToUserShop(resource.data);
 
       allow create: if barberOwnsData(request.resource.data)
         || (signedIn()
+          && belongsToUserShop(request.resource.data)
           && request.resource.data.status == "booked"
           && getAfter(/databases/$(database)/documents/appointments/$(request.resource.data.appointmentId)).data.clientId == request.auth.uid
           && getAfter(/databases/$(database)/documents/appointments/$(request.resource.data.appointmentId)).data.slotId == slotId
-          && dataShopId(getAfter(/databases/$(database)/documents/appointments/$(request.resource.data.appointmentId)).data) == dataShopId(request.resource.data));
+          && dataShopId(getAfter(/databases/$(database)/documents/appointments/$(request.resource.data.appointmentId)).data) == userShopId());
 
       allow update: if barberOwnsData(resource.data)
         && dataShopId(request.resource.data) == dataShopId(resource.data);
 
       allow delete: if barberOwnsData(resource.data)
         || (signedIn()
+          && belongsToUserShop(resource.data)
           && getAfter(/databases/$(database)/documents/appointments/$(resource.data.appointmentId)).data.clientId == request.auth.uid
           && getAfter(/databases/$(database)/documents/appointments/$(resource.data.appointmentId)).data.status == "cancelled");
     }
 
     match /services/{serviceId} {
-      allow read: if signedIn();
+      allow read: if signedIn() && belongsToUserShop(resource.data);
       allow create: if barberOwnsData(request.resource.data);
       allow update, delete: if barberOwnsData(resource.data);
     }
 
     match /products/{productId} {
-      allow read: if signedIn();
+      allow read: if signedIn() && belongsToUserShop(resource.data);
       allow create: if barberOwnsData(request.resource.data);
       allow update, delete: if barberOwnsData(resource.data);
     }
 
     match /gallery/{photoId} {
-      allow read: if signedIn();
+      allow read: if signedIn() && belongsToUserShop(resource.data);
       allow create: if barberOwnsData(request.resource.data);
       allow update, delete: if barberOwnsData(resource.data);
     }
