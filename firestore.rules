@@ -67,9 +67,19 @@ service cloud.firestore {
       allow read: if isOwner(userId);
       allow update: if isOwner(userId)
         && request.resource.data.role == resource.data.role
-        && request.resource.data.shopId == resource.data.shopId
-        && request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(["name", "phone", "updatedAt"]);
+        && dataShopId(request.resource.data) == dataShopId(resource.data)
+        && (
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(["name", "phone", "updatedAt"])
+          || (
+            resource.data.role == "barber"
+            && !resource.data.keys().hasAny(["barberCode"])
+            && request.resource.data.keys().hasAll(["barberCode"])
+            && request.resource.data.barberCode is string
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(["barberCode", "updatedAt"])
+          )
+        );
       allow delete: if false;
     }
 
