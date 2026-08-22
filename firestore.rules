@@ -43,12 +43,14 @@ service cloud.firestore {
     }
 
     match /barberCodes/{code} {
-      // The code is intentionally readable before login so a new client can
+      // Shop codes are intentionally readable before login so a new client can
       // resolve the correct shop before creating their account.
       allow read: if true;
+      // A random code can only be claimed once, by the barber who owns that shop.
       allow create: if signedIn()
         && isBarber()
-        && request.resource.data.shopId == userShopId();
+        && request.resource.data.shopId == userShopId()
+        && !exists(/databases/$(database)/documents/barberCodes/$(code));
       allow update: if false;
       allow delete: if isBarber() && resource.data.shopId == userShopId();
     }
@@ -89,10 +91,10 @@ service cloud.firestore {
     }
 
     match /appointments/{appointmentId} {
-      // A client query is scoped by clientId in the app. New writes are still
-      // hard-bound to the shop stored on the user's profile below.
       allow read: if barberOwnsData(resource.data)
-        || (signedIn() && resource.data.clientId == request.auth.uid);
+        || (signedIn()
+          && resource.data.clientId == request.auth.uid
+          && belongsToUserShop(resource.data));
 
       allow create: if barberOwnsData(request.resource.data)
         || (signedIn()
