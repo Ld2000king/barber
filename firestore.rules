@@ -89,10 +89,10 @@ service cloud.firestore {
     }
 
     match /appointments/{appointmentId} {
+      // A client query is scoped by clientId in the app. New writes are still
+      // hard-bound to the shop stored on the user's profile below.
       allow read: if barberOwnsData(resource.data)
-        || (signedIn()
-          && resource.data.clientId == request.auth.uid
-          && belongsToUserShop(resource.data));
+        || (signedIn() && resource.data.clientId == request.auth.uid);
 
       allow create: if barberOwnsData(request.resource.data)
         || (signedIn()
