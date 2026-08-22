@@ -42,11 +42,20 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
+      // TESTING: self-service signup can create either a client or barber
+      // profile. Before production, barber creation should move behind an
+      // owner/admin invite or trusted backend.
       allow create: if isOwner(userId)
-        && request.resource.data.role == "client";
+        && request.resource.data.role in ["client", "barber"]
+        && (request.resource.data.role == "client"
+          || (request.resource.data.keys().hasAll(["shopId"])
+            && request.resource.data.shopId is string
+            && request.resource.data.shopId.size() >= 3));
       allow read: if isOwner(userId);
       allow update: if isOwner(userId)
         && request.resource.data.role == resource.data.role
+        && (!resource.data.keys().hasAny(["shopId"])
+          || request.resource.data.shopId == resource.data.shopId)
         && request.resource.data.diff(resource.data).affectedKeys()
           .hasOnly(["name", "phone", "updatedAt"]);
       allow delete: if false;
