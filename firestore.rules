@@ -6,59 +6,104 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function userProfile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
     function isOwner(userId) {
       return signedIn() && request.auth.uid == userId;
     }
 
     function isBarber() {
       return signedIn()
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "barber";
+        && userProfile().data.role == "barber";
+    }
+
+    // Existing Ari Cohen barber accounts predate multi-tenancy. Keeping this
+    // fallback makes the migration backwards-compatible until shopId is added.
+    function barberShopId() {
+      return userProfile().data.keys().hasAny(["shopId"])
+        ? userProfile().data.shopId
+        : "ari-cohen";
+    }
+
+    function dataShopId(data) {
+      return data.keys().hasAny(["shopId"])
+        ? data.shopId
+        : "ari-cohen";
+    }
+
+    function barberOwnsShop(shopId) {
+      return isBarber() && barberShopId() == shopId;
+    }
+
+    function barberOwnsData(data) {
+      return isBarber() && barberShopId() == dataShopId(data);
     }
 
     match /users/{userId} {
+      // TESTING: self-service signup can create either a client or barber
+      // profile. Before production, barber creation should move behind an
+      // owner/admin invite or trusted backend.
       allow create: if isOwner(userId)
-        && request.resource.data.role == "client";
-      allow read: if isOwner(userId) || isBarber();
-      allow update: if isBarber()
-        || (isOwner(userId)
-          && request.resource.data.role == resource.data.role
-          && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(["name", "phone", "updatedAt"]));
-      allow delete: if isBarber();
+        && request.resource.data.role in ["client", "barber"]
+        && (request.resource.data.role == "client"
+          || (request.resource.data.keys().hasAll(["shopId"])
+            && request.resource.data.shopId is string
+            && request.resource.data.shopId.size() >= 3));
+      allow read: if isOwner(userId);
+      allow update: if isOwner(userId)
+        && request.resource.data.role == resource.data.role
+        && (!resource.data.keys().hasAny(["shopId"])
+          || request.resource.data.shopId == resource.data.shopId)
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(["name", "phone", "updatedAt"]);
+      allow delete: if false;
     }
 
     match /businesses/{businessId} {
       allow read: if signedIn();
-      allow create, update, delete: if isBarber();
+      allow create, update, delete: if barberOwnsShop(businessId);
     }
 
     match /appointments/{appointmentId} {
-      allow read: if isBarber()
+      allow read: if barberOwnsData(resource.data)
         || (signedIn() && resource.data.clientId == request.auth.uid);
-      allow create: if isBarber()
+
+      allow create: if barberOwnsData(request.resource.data)
         || (signedIn()
           && request.resource.data.clientId == request.auth.uid
           && request.resource.data.status == "confirmed"
-          && getAfter(/databases/$(database)/documents/availability/$(request.resource.data.slotId)).data.appointmentId == appointmentId);
-      allow update: if isBarber()
+          && getAfter(/databases/$(database)/documents/availability/$(request.resource.data.slotId)).data.appointmentId == appointmentId
+          && dataShopId(getAfter(/databases/$(database)/documents/availability/$(request.resource.data.slotId)).data) == dataShopId(request.resource.data));
+
+      allow update: if (barberOwnsData(resource.data)
+          && dataShopId(request.resource.data) == dataShopId(resource.data))
         || (signedIn()
           && resource.data.clientId == request.auth.uid
           && request.resource.data.clientId == resource.data.clientId
+          && dataShopId(request.resource.data) == dataShopId(resource.data)
           && request.resource.data.status == "cancelled"
           && request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(["status", "updatedAt"]));
-      allow delete: if isBarber();
+
+      allow delete: if barberOwnsData(resource.data);
     }
 
     match /availability/{slotId} {
       allow read: if signedIn();
-      allow create: if isBarber()
+
+      allow create: if barberOwnsData(request.resource.data)
         || (signedIn()
           && request.resource.data.status == "booked"
           && getAfter(/databases/$(database)/documents/appointments/$(request.resource.data.appointmentId)).data.clientId == request.auth.uid
-          && getAfter(/databases/$(database)/documents/appointments/$(request.resource.data.appointmentId)).data.slotId == slotId);
-      allow update: if isBarber();
-      allow delete: if isBarber()
+          && getAfter(/databases/$(database)/documents/appointments/$(request.resource.data.appointmentId)).data.slotId == slotId
+          && dataShopId(getAfter(/databases/$(database)/documents/appointments/$(request.resource.data.appointmentId)).data) == dataShopId(request.resource.data));
+
+      allow update: if barberOwnsData(resource.data)
+        && dataShopId(request.resource.data) == dataShopId(resource.data);
+
+      allow delete: if barberOwnsData(resource.data)
         || (signedIn()
           && getAfter(/databases/$(database)/documents/appointments/$(resource.data.appointmentId)).data.clientId == request.auth.uid
           && getAfter(/databases/$(database)/documents/appointments/$(resource.data.appointmentId)).data.status == "cancelled");
@@ -66,21 +111,26 @@ service cloud.firestore {
 
     match /services/{serviceId} {
       allow read: if signedIn();
-      allow write: if isBarber();
+      allow create: if barberOwnsData(request.resource.data);
+      allow update, delete: if barberOwnsData(resource.data);
     }
 
     match /products/{productId} {
       allow read: if signedIn();
-      allow write: if isBarber();
+      allow create: if barberOwnsData(request.resource.data);
+      allow update, delete: if barberOwnsData(resource.data);
     }
 
     match /gallery/{photoId} {
       allow read: if signedIn();
-      allow write: if isBarber();
+      allow create: if barberOwnsData(request.resource.data);
+      allow update, delete: if barberOwnsData(resource.data);
     }
 
     match /broadcasts/{messageId} {
-      allow read, write: if isBarber();
+      allow read: if barberOwnsData(resource.data);
+      allow create: if barberOwnsData(request.resource.data);
+      allow update, delete: if barberOwnsData(resource.data);
     }
   }
 }
