@@ -126,17 +126,6 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    match /mail/{mailId} {
-      // Consumed by the "Trigger Email" Firestore extension to notify the
-      // admin about a new shop approval request.
-      allow create: if signedIn()
-        && request.resource.data.to is list
-        && request.resource.data.to.size() == 1
-        && request.resource.data.to[0] == "liavdimri12@gmail.com"
-        && request.resource.data.keys().hasOnly(["to", "message"]);
-      allow read, update, delete: if false;
-    }
-
     match /appointments/{appointmentId} {
       allow read: if barberOwnsData(resource.data)
         || (signedIn()

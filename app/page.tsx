@@ -3,6 +3,7 @@
 import {ChangeEvent,FormEvent,useEffect,useMemo,useRef,useState} from "react";
 import {createUserWithEmailAndPassword,onAuthStateChanged,signInWithEmailAndPassword,signOut as firebaseSignOut} from "firebase/auth";
 import {collection,doc,getDoc,onSnapshot,query,runTransaction,serverTimestamp,setDoc,where,writeBatch} from "firebase/firestore";
+import emailjs from "@emailjs/browser";
 import {auth,db} from "../lib/firebase";
 
 type PriceItem={id:string;name:string;price:number;note:string};
@@ -21,7 +22,14 @@ type OccupiedSlot={id:string;shopId?:string;date:string;time:string;status:"book
 
 const DEFAULT_SHOP_ID="ari-cohen";
 const ADMIN_EMAIL="liavdimri12@gmail.com";
+const EMAILJS_SERVICE_ID=import.meta.env.VITE_EMAILJS_SERVICE_ID as string|undefined;
+const EMAILJS_TEMPLATE_ID=import.meta.env.VITE_EMAILJS_TEMPLATE_ID as string|undefined;
+const EMAILJS_PUBLIC_KEY=import.meta.env.VITE_EMAILJS_PUBLIC_KEY as string|undefined;
 const resolveApprovalStatus=(role:Role,data:Record<string,unknown>):ApprovalStatus=>{if(role!=="barber")return"approved";const status=String(data.status||"");return status==="pending"?"pending":status==="rejected"?"rejected":"approved"};
+function notifyAdminOfShopRequest(shopName:string,email:string,phone:string){
+ if(!EMAILJS_SERVICE_ID||!EMAILJS_TEMPLATE_ID||!EMAILJS_PUBLIC_KEY)return Promise.resolve();
+ return emailjs.send(EMAILJS_SERVICE_ID,EMAILJS_TEMPLATE_ID,{to_email:ADMIN_EMAIL,shop_name:shopName,barber_email:email,barber_phone:phone},{publicKey:EMAILJS_PUBLIC_KEY}).catch(()=>undefined);
+}
 const cleanShopId=(value:string)=>value.toLowerCase().trim().replace(/[^a-z0-9-]/g,"-").replace(/-+/g,"-").replace(/^-|-$/g,"")||DEFAULT_SHOP_ID;
 const cleanBarberCode=(value:string)=>value.toUpperCase().replace(/[^A-Z0-9]/g,"").slice(0,10);
 const makeBarberCode=()=>{const chars="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";return Array.from({length:8},()=>chars[Math.floor(Math.random()*chars.length)]).join("")};
@@ -112,7 +120,7 @@ export default function Home(){
      const credential=await createUserWithEmailAndPassword(auth,email,password),newShopId=cleanShopId(`${shopName}-${credential.user.uid.slice(0,6)}`);
      await setDoc(doc(db,"users",credential.user.uid),{email,phone,role:"barber",shopId:newShopId,shopName,status:"pending",createdAt:serverTimestamp(),updatedAt:serverTimestamp()});
      await setDoc(doc(db,"shopApprovals",credential.user.uid),{uid:credential.user.uid,email,phone,shopId:newShopId,shopName,status:"pending",createdAt:serverTimestamp()});
-     await setDoc(doc(collection(db,"mail")),{to:[ADMIN_EMAIL],message:{subject:`בקשת אישור למספרה חדשה: ${shopName}`,text:`התקבלה בקשה חדשה להצטרפות ספר לאפליקציה.\n\nשם המספרה: ${shopName}\nאימייל: ${email}\nטלפון: ${phone}\n\nלאישור או דחייה יש להיכנס לאפליקציה עם חשבון המנהל ולפתוח את פאנל הניהול.`}});
+     await notifyAdminOfShopRequest(shopName,email,phone);
      setShopId(newShopId);setSession({uid:credential.user.uid,email,phone,role:"barber",shopId:newShopId,approvalStatus:"pending",shopName});setToast("הבקשה נשלחה לאישור. תקבלו גישה למספרה לאחר האישור");
     }
    }else{
