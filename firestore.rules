@@ -14,6 +14,10 @@ service cloud.firestore {
       return signedIn() && request.auth.uid == userId;
     }
 
+    function admin() {
+      return signedIn() && request.auth.token.email == "liavdimri12@gmail.com";
+    }
+
     function isBarber() {
       return signedIn() && userProfile().data.role == "barber";
     }
@@ -49,6 +53,7 @@ service cloud.firestore {
       // A random code can only be claimed once, by the barber who owns that shop.
       allow create: if signedIn()
         && isBarber()
+        && userProfile().data.get("status", "approved") == "approved"
         && request.resource.data.shopId == userShopId()
         && !exists(/databases/$(database)/documents/barberCodes/$(code));
       allow update: if false;
@@ -57,37 +62,79 @@ service cloud.firestore {
 
     match /users/{userId} {
       // TESTING: self-service signup can create either a client or barber.
+      // A new barber account always starts in "pending" status and only an
+      // admin-approved account may claim a barber code or open a business.
       allow create: if isOwner(userId)
         && request.resource.data.role in ["client", "barber"]
         && request.resource.data.keys().hasAll(["shopId"])
         && request.resource.data.shopId is string
         && request.resource.data.shopId.size() >= 3
         && (request.resource.data.role == "barber"
-          || (request.resource.data.keys().hasAll(["barberCode"])
+          ? (request.resource.data.keys().hasAll(["status"])
+            && request.resource.data.status == "pending")
+          : (request.resource.data.keys().hasAll(["barberCode"])
             && exists(/databases/$(database)/documents/barberCodes/$(request.resource.data.barberCode))
             && get(/databases/$(database)/documents/barberCodes/$(request.resource.data.barberCode)).data.shopId == request.resource.data.shopId));
       allow read: if isOwner(userId);
-      allow update: if isOwner(userId)
-        && request.resource.data.role == resource.data.role
-        && dataShopId(request.resource.data) == dataShopId(resource.data)
-        && (
-          request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(["name", "phone", "updatedAt"])
-          || (
-            resource.data.role == "barber"
-            && !resource.data.keys().hasAny(["barberCode"])
-            && request.resource.data.keys().hasAll(["barberCode"])
-            && request.resource.data.barberCode is string
-            && request.resource.data.diff(resource.data).affectedKeys()
-              .hasOnly(["barberCode", "updatedAt"])
+      allow update: if (
+          isOwner(userId)
+          && request.resource.data.role == resource.data.role
+          && dataShopId(request.resource.data) == dataShopId(resource.data)
+          && (
+            request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(["name", "phone", "updatedAt"])
+            || (
+              resource.data.role == "barber"
+              && !resource.data.keys().hasAny(["barberCode"])
+              && request.resource.data.keys().hasAll(["barberCode"])
+              && request.resource.data.barberCode is string
+              && request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(["barberCode", "updatedAt"])
+            )
           )
+        ) || (
+          // Only the admin may move a pending barber to approved/rejected.
+          admin()
+          && resource.data.role == "barber"
+          && resource.data.get("status", "approved") == "pending"
+          && request.resource.data.status in ["approved", "rejected"]
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(["status", "updatedAt"])
         );
       allow delete: if false;
     }
 
     match /businesses/{businessId} {
       allow read: if signedIn() && userShopId() == businessId;
-      allow create, update, delete: if barberOwnsShop(businessId);
+      // A shop can only be created once its owning barber account is approved.
+      allow create: if barberOwnsShop(businessId)
+        && userProfile().data.get("status", "approved") == "approved";
+      allow update, delete: if barberOwnsShop(businessId);
+    }
+
+    match /shopApprovals/{uid} {
+      // Written by a barber at signup, reviewed only by the admin.
+      allow create: if isOwner(uid)
+        && request.resource.data.uid == uid
+        && request.resource.data.status == "pending";
+      allow read: if admin() || isOwner(uid);
+      allow update: if admin()
+        && resource.data.status == "pending"
+        && request.resource.data.status in ["approved", "rejected"]
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(["status", "reviewedAt"]);
+      allow delete: if false;
+    }
+
+    match /mail/{mailId} {
+      // Consumed by the "Trigger Email" Firestore extension to notify the
+      // admin about a new shop approval request.
+      allow create: if signedIn()
+        && request.resource.data.to is list
+        && request.resource.data.to.size() == 1
+        && request.resource.data.to[0] == "liavdimri12@gmail.com"
+        && request.resource.data.keys().hasOnly(["to", "message"]);
+      allow read, update, delete: if false;
     }
 
     match /appointments/{appointmentId} {
