@@ -11,9 +11,13 @@ type Product={id:string;name:string;price:number;description:string;image?:strin
 type Business={name:string;tagline:string;phone:string;whatsapp:string;address:string;mapQuery:string;hours:string};
 type Tab="home"|"prices"|"gallery"|"products"|"appointments";
 type Role="barber"|"client";
-type ApprovalStatus="pending"|"approved"|"rejected";
+type ApprovalStatus="pending"|"approved"|"rejected"|"suspended";
 type Session={uid:string;role:Role;phone:string;email:string;shopId:string;approvalStatus:ApprovalStatus;shopName?:string};
 type ShopApproval={id:string;uid:string;shopName:string;email:string;phone:string;shopId:string;status:ApprovalStatus};
+type AdminUser={uid:string;email:string;phone:string;role:Role;shopId:string;shopName?:string;status?:string;barberCode?:string;createdAt?:{seconds:number}};
+type AdminBusiness={shopId:string;barberCode?:string;business?:Business;prices?:PriceItem[];products?:Product[];gallery?:string[];schedule?:Schedule;createdAt?:{seconds:number};updatedAt?:{seconds:number}};
+type AdminAppointment={id:string;shopId:string;clientId?:string;clientName?:string;clientPhone:string;clientEmail?:string;service:string;date:string;time:string;status:string;createdBy?:string;createdAt?:{seconds:number};updatedAt?:{seconds:number}};
+type ShopView={shopId:string;name:string;barberCode:string;status:ApprovalStatus;owner?:AdminUser;business?:AdminBusiness;createdAtSec:number;appts:AdminAppointment[];clientCount:number;upcoming:number;thisWeek:number;confirmed:number;cancelled:number;lastActivitySec:number};
 type AuthErrors={email?:string;password?:string;phone?:string;barberCode?:string;form?:string};
 type Appointment={id:string;shopId?:string;clientId?:string;clientName?:string;clientPhone:string;service:string;date:string;time:string;status:"pending"|"confirmed"|"cancelled"};
 type WorkDay={enabled:boolean;start:string;end:string;slots:number};
@@ -25,7 +29,11 @@ const ADMIN_EMAIL="liavdimri12@gmail.com";
 const EMAILJS_SERVICE_ID=import.meta.env.VITE_EMAILJS_SERVICE_ID as string|undefined;
 const EMAILJS_TEMPLATE_ID=import.meta.env.VITE_EMAILJS_TEMPLATE_ID as string|undefined;
 const EMAILJS_PUBLIC_KEY=import.meta.env.VITE_EMAILJS_PUBLIC_KEY as string|undefined;
-const resolveApprovalStatus=(role:Role,data:Record<string,unknown>):ApprovalStatus=>{if(role!=="barber")return"approved";const status=String(data.status||"");return status==="pending"?"pending":status==="rejected"?"rejected":"approved"};
+const resolveApprovalStatus=(role:Role,data:Record<string,unknown>):ApprovalStatus=>{if(role!=="barber")return"approved";const status=String(data.status||"");return status==="pending"?"pending":status==="rejected"?"rejected":status==="suspended"?"suspended":"approved"};
+const normalizeStatus=(value:unknown):ApprovalStatus=>{const status=String(value||"");return status==="pending"?"pending":status==="rejected"?"rejected":status==="suspended"?"suspended":"approved"};
+const secondsOf=(value:unknown):number=>{const seconds=(value as {seconds?:number})?.seconds;return typeof seconds==="number"?seconds:0};
+const todayKey=()=>dateKey(new Date());
+const weekAheadKey=()=>{const date=new Date();date.setDate(date.getDate()+7);return dateKey(date)};
 function notifyAdminOfShopRequest(shopName:string,email:string,phone:string){
  if(!EMAILJS_SERVICE_ID||!EMAILJS_TEMPLATE_ID||!EMAILJS_PUBLIC_KEY)return Promise.resolve();
  return emailjs.send(EMAILJS_SERVICE_ID,EMAILJS_TEMPLATE_ID,{to_email:ADMIN_EMAIL,shop_name:shopName,barber_email:email,barber_phone:phone},{publicKey:EMAILJS_PUBLIC_KEY}).catch(()=>undefined);
@@ -145,7 +153,7 @@ export default function Home(){
  if(isAdmin)return <AdminDashboard onSignOut={signOut}/>;
  if(!session)return <main className="auth-shell">{toast&&<div className="toast">{toast}</div>}<div className="auth-brand"><img src="/barbers-logo.png" alt="לוגו BARBERS"/><strong>{business.name}</strong><small>BARBER STUDIO</small></div>{!roleChoice?<section className="role-card"><small>ברוכים הבאים</small><h1>איך תרצו להיכנס?</h1><p>בחרו את סוג החשבון כדי שנציג לכם רק את הכלים המתאימים.</p><button onClick={()=>{setRoleChoice("client");setAuthMode("register");setAuthErrors({})}}><i>♙</i><div><strong>כניסה כלקוח</strong><small>תורים, גלריה, מחירון ודרכי הגעה</small></div><b>‹</b></button><button onClick={()=>{setRoleChoice("barber");setAuthMode("login");setAuthErrors({})}}><i>✂</i><div><strong>כניסה כספר</strong><small>כניסה קיימת או הרשמה כספר חדש</small></div><b>‹</b></button></section>:<section className="phone-card"><button className="auth-back" onClick={()=>{setRoleChoice(null);setAuthErrors({})}}>→</button><small>{roleChoice==="barber"?(authMode==="register"?"הרשמת ספר חדש":"כניסת ספר"):(authMode==="register"?"הרשמת לקוח":"כניסת לקוח")}</small><h1>{authMode==="register"?(roleChoice==="barber"?"פתיחת מספרה חדשה":"פתיחת חשבון"):"כניסה לחשבון"}</h1><p>{authMode==="register"?(roleChoice==="barber"?"ניצור חשבון ספר ומספרה נפרדת עם יומן, תורים ותוכן משלה.":"הזינו את קוד המספרה שקיבלתם. החשבון ישויך אליה באופן קבוע."):"הזינו את פרטי החשבון שאיתם נרשמתם."}</p><form onSubmit={identify} noValidate>{authErrors.form&&<div className="auth-form-error" role="alert">{authErrors.form}</div>}{roleChoice==="barber"&&authMode==="register"&&<label>שם המספרה<input name="shopName" type="text" placeholder="לדוגמה: Liav Barber" autoFocus required/></label>}{roleChoice==="client"&&authMode==="register"&&<label>קוד מספרה<input name="barberCode" type="text" inputMode="text" placeholder="לדוגמה: A7K9Q2M4" autoCapitalize="characters" autoFocus aria-invalid={Boolean(authErrors.barberCode)} onChange={e=>{e.currentTarget.value=cleanBarberCode(e.currentTarget.value);authErrors.barberCode&&setAuthErrors(current=>({...current,barberCode:undefined}))}} required/>{authErrors.barberCode&&<small className="field-error">{authErrors.barberCode}</small>}</label>}<label>אימייל<input name="email" type="email" inputMode="email" placeholder="name@example.com" autoFocus={authMode!=="register"} aria-invalid={Boolean(authErrors.email)}/>{authErrors.email&&<small className="field-error">{authErrors.email}</small>}</label><label>סיסמה<input name="password" type="password" placeholder="לפחות 6 תווים" aria-invalid={Boolean(authErrors.password)}/>{authErrors.password&&<small className="field-error">{authErrors.password}</small>}</label><label>מספר טלפון<input name="phone" type="tel" inputMode="tel" placeholder="05X-XXXXXXX" aria-invalid={Boolean(authErrors.phone)}/>{authErrors.phone&&<small className="field-error">{authErrors.phone}</small>}</label><button className="black-button wide" type="submit" disabled={authBusy}>{authBusy?"בודקים את הפרטים...":authMode==="register"?(roleChoice==="barber"?"פתיחת חשבון ספר":"פתיחת חשבון לקוח"):"כניסה"}</button></form><button className="auth-switch" onClick={()=>{setAuthMode(mode=>mode==="login"?"register":"login");setAuthErrors({})}}>{authMode==="register"?(roleChoice==="barber"?"כבר יש לך חשבון ספר? כניסה":"כבר נרשמת? כניסה לחשבון"):(roleChoice==="barber"?"ספר חדש? הרשמה כספר חדש":"לקוח חדש? פתיחת חשבון")}</button><em>{roleChoice==="barber"&&authMode==="register"?"הרשמת ספר חדש כפופה לאישור הנהלת האפליקציה":roleChoice==="client"&&authMode==="register"?"את קוד המספרה מקבלים מהמספרה":"השיוך למספרה נשמר בחשבון"}</em></section>}</main>;
 
- if(session.role==="barber"&&session.approvalStatus!=="approved")return <main className="auth-shell">{toast&&<div className="toast">{toast}</div>}<div className="auth-brand"><img src="/barbers-logo.png" alt="לוגו BARBERS"/><strong>{session.shopName||business.name}</strong><small>BARBER STUDIO</small></div><section className="role-card">{session.approvalStatus==="rejected"?<><small>סטטוס בקשה</small><h1>הבקשה נדחתה</h1><p>הבקשה שלכם להצטרפות כספר לאפליקציה לא אושרה. לפרטים נוספים אפשר לפנות אלינו בוואטסאפ.</p></>:<><small>סטטוס בקשה</small><h1>הבקשה ממתינה לאישור</h1><p>קיבלנו את הבקשה לפתיחת מספרה חדשה. ברגע שהבקשה תאושר תקבלו גישה מלאה למספרה — אין צורך לעשות דבר בינתיים.</p></>}<button className="black-button wide" onClick={signOut}>יציאה</button></section></main>;
+ if(session.role==="barber"&&session.approvalStatus!=="approved")return <main className="auth-shell">{toast&&<div className="toast">{toast}</div>}<div className="auth-brand"><img src="/barbers-logo.png" alt="לוגו BARBERS"/><strong>{session.shopName||business.name}</strong><small>BARBER STUDIO</small></div><section className="role-card">{session.approvalStatus==="rejected"?<><small>סטטוס בקשה</small><h1>הבקשה נדחתה</h1><p>הבקשה שלכם להצטרפות כספר לאפליקציה לא אושרה. לפרטים נוספים אפשר לפנות אלינו בוואטסאפ.</p></>:session.approvalStatus==="suspended"?<><small>סטטוס מספרה</small><h1>המספרה הושבתה זמנית</h1><p>הגישה למספרה הושבתה על ידי הנהלת האפליקציה. כל הנתונים שמורים ויחזרו במלואם עם הפעלה מחדש. לפרטים אפשר לפנות אלינו בוואטסאפ.</p></>:<><small>סטטוס בקשה</small><h1>הבקשה ממתינה לאישור</h1><p>קיבלנו את הבקשה לפתיחת מספרה חדשה. ברגע שהבקשה תאושר תקבלו גישה מלאה למספרה — אין צורך לעשות דבר בינתיים.</p></>}<button className="black-button wide" onClick={signOut}>יציאה</button></section></main>;
 
  return <main className="app-shell">
   <header className="app-header"><button className="mini-logo" onClick={()=>openTab("home")} aria-label="חזרה לדף הבית"><img src="/barbers-logo.png" alt=""/></button><strong>{business.name}</strong><button className="manage-link" onClick={session.role==="barber"?()=>setAdminOpen(true):signOut}>{session.role==="barber"?"ניהול":"יציאה"}</button></header>
@@ -166,30 +174,192 @@ export default function Home(){
  </main>
 }
 
+const statusMeta:Record<ApprovalStatus,{label:string;cls:string}>={approved:{label:"פעילה",cls:"ok"},suspended:{label:"מושבתת",cls:"warn"},pending:{label:"ממתינה",cls:"pending"},rejected:{label:"נדחתה",cls:"bad"}};
+const apptStatusLabel=(status:string)=>status==="confirmed"?"מאושר":status==="cancelled"?"בוטל":status==="pending"?"ממתין":status;
+const fromSeconds=(seconds:number)=>seconds?new Date(seconds*1000).toLocaleDateString("he-IL"):"—";
+const relativeFromSeconds=(seconds:number)=>{if(!seconds)return"אין פעילות";const diff=Date.now()/1000-seconds;if(diff<3600)return"לפני פחות משעה";if(diff<86400)return`לפני ${Math.floor(diff/3600)} שעות`;if(diff<86400*30)return`לפני ${Math.floor(diff/86400)} ימים`;return fromSeconds(seconds)};
+
 function AdminDashboard({onSignOut}:{onSignOut:()=>void}){
- const [pending,setPending]=useState<ShopApproval[]>([]),[busyId,setBusyId]=useState<string|null>(null),[toast,setToast]=useState("");
- useEffect(()=>{const pendingQuery=query(collection(db,"shopApprovals"),where("status","==","pending"));return onSnapshot(pendingQuery,snapshot=>setPending(snapshot.docs.map(item=>({id:item.id,...item.data()} as ShopApproval))),()=>setToast("לא הצלחנו לטעון את הבקשות"))},[]);
- useEffect(()=>{if(!toast)return;const timer=setTimeout(()=>setToast(""),2300);return()=>clearTimeout(timer)},[toast]);
- async function decide(item:ShopApproval,decision:"approved"|"rejected"){
-  setBusyId(item.id);
+ const [users,setUsers]=useState<AdminUser[]>([]);
+ const [businesses,setBusinesses]=useState<AdminBusiness[]>([]);
+ const [appointments,setAppointments]=useState<AdminAppointment[]>([]);
+ const [ready,setReady]=useState({users:false,businesses:false,appointments:false});
+ const [tab,setTab]=useState<"overview"|"shops"|"requests">("overview");
+ const [openShopId,setOpenShopId]=useState<string|null>(null);
+ const [shopFilter,setShopFilter]=useState<"all"|"approved"|"suspended"|"pending">("all");
+ const [busyUid,setBusyUid]=useState<string|null>(null);
+ const [toast,setToast]=useState("");
+
+ useEffect(()=>onSnapshot(collection(db,"users"),s=>{setUsers(s.docs.map(d=>({uid:d.id,...d.data()} as AdminUser)));setReady(r=>({...r,users:true}))},()=>setToast("לא הצלחנו לטעון משתמשים")),[]);
+ useEffect(()=>onSnapshot(collection(db,"businesses"),s=>{setBusinesses(s.docs.map(d=>({shopId:d.id,...d.data()} as AdminBusiness)));setReady(r=>({...r,businesses:true}))},()=>setToast("לא הצלחנו לטעון מספרות")),[]);
+ useEffect(()=>onSnapshot(collection(db,"appointments"),s=>{setAppointments(s.docs.map(d=>({id:d.id,...d.data()} as AdminAppointment)));setReady(r=>({...r,appointments:true}))},()=>setToast("לא הצלחנו לטעון תורים")),[]);
+ useEffect(()=>{if(!toast)return;const timer=setTimeout(()=>setToast(""),2600);return()=>clearTimeout(timer)},[toast]);
+
+ const today=todayKey(),weekAhead=weekAheadKey();
+ const shops=useMemo<ShopView[]>(()=>{
+  const barberByShop=new Map<string,AdminUser>();
+  users.forEach(u=>{if(u.role==="barber"&&u.shopId)barberByShop.set(u.shopId,u)});
+  const bizByShop=new Map(businesses.map(b=>[b.shopId,b]));
+  const apptsByShop=new Map<string,AdminAppointment[]>();
+  appointments.forEach(a=>{if(!a.shopId)return;const list=apptsByShop.get(a.shopId)||[];list.push(a);apptsByShop.set(a.shopId,list)});
+  const clientsByShop=new Map<string,Set<string>>();
+  users.forEach(u=>{if(u.role==="client"&&u.shopId){const set=clientsByShop.get(u.shopId)||new Set<string>();set.add(u.uid);clientsByShop.set(u.shopId,set)}});
+  const shopIds=new Set<string>([...barberByShop.keys(),...bizByShop.keys(),...apptsByShop.keys()]);
+  const rows:ShopView[]=[];
+  shopIds.forEach(shopId=>{
+   const owner=barberByShop.get(shopId),biz=bizByShop.get(shopId);
+   const appts=(apptsByShop.get(shopId)||[]).slice().sort((a,b)=>`${b.date}${b.time}`.localeCompare(`${a.date}${a.time}`));
+   const phones=new Set<string>();appts.forEach(a=>{if(a.clientPhone)phones.add(a.clientPhone)});
+   const clientCount=Math.max(phones.size,(clientsByShop.get(shopId)||new Set()).size);
+   const activeAppts=appts.filter(a=>a.status!=="cancelled");
+   const lastActivitySec=Math.max(0,secondsOf(biz?.updatedAt),...appts.map(a=>Math.max(secondsOf(a.updatedAt),secondsOf(a.createdAt))));
+   rows.push({shopId,name:biz?.business?.name||owner?.shopName||shopId,barberCode:biz?.barberCode||owner?.barberCode||"—",
+    status:owner?normalizeStatus(owner.status):"approved",owner,business:biz,
+    createdAtSec:secondsOf(owner?.createdAt)||secondsOf(biz?.createdAt),
+    appts,clientCount,
+    upcoming:activeAppts.filter(a=>a.date>=today).length,
+    thisWeek:activeAppts.filter(a=>a.date>=today&&a.date<=weekAhead).length,
+    confirmed:appts.filter(a=>a.status==="confirmed").length,
+    cancelled:appts.filter(a=>a.status==="cancelled").length,
+    lastActivitySec});
+  });
+  rows.sort((a,b)=>b.lastActivitySec-a.lastActivitySec||a.name.localeCompare(b.name));
+  return rows;
+ },[users,businesses,appointments,today,weekAhead]);
+
+ const loading=!ready.users||!ready.businesses||!ready.appointments;
+ const weekAgoSec=Date.now()/1000-7*86400;
+ const kpi={
+  total:shops.length,
+  approved:shops.filter(s=>s.status==="approved").length,
+  suspended:shops.filter(s=>s.status==="suspended").length,
+  pending:shops.filter(s=>s.status==="pending").length,
+  clients:new Set(appointments.map(a=>a.clientPhone).filter(Boolean)).size,
+  appts:appointments.length,
+  upcoming:shops.reduce((n,s)=>n+(s.status==="approved"?s.upcoming:0),0),
+  thisWeek:shops.reduce((n,s)=>n+(s.status==="approved"?s.thisWeek:0),0),
+  activeWeek:shops.filter(s=>s.lastActivitySec>=weekAgoSec).length,
+ };
+ const pendingShops=shops.filter(s=>s.status==="pending");
+ const filteredShops=shopFilter==="all"?shops:shops.filter(s=>s.status===shopFilter);
+ const openShop=openShopId?shops.find(s=>s.shopId===openShopId)??null:null;
+
+ async function setStatus(shop:ShopView,status:"approved"|"suspended"|"rejected"){
+  const uid=shop.owner?.uid;if(!uid){setToast("אין חשבון ספר משויך למספרה הזו");return}
+  setBusyUid(uid);
   try{
    const batch=writeBatch(db);
-   batch.update(doc(db,"shopApprovals",item.id),{status:decision,reviewedAt:serverTimestamp()});
-   batch.update(doc(db,"users",item.uid),{status:decision,updatedAt:serverTimestamp()});
+   batch.update(doc(db,"users",uid),{status,updatedAt:serverTimestamp()});
+   if(shop.status==="pending")batch.set(doc(db,"shopApprovals",uid),{status,reviewedAt:serverTimestamp()},{merge:true});
    await batch.commit();
-   setToast(decision==="approved"?"המספרה אושרה ותיכנס לשרת":"הבקשה נדחתה");
-  }catch{setToast("הפעולה נכשלה, נסו שוב")}finally{setBusyId(null)}
+   setToast(status==="approved"?"המספרה פעילה":status==="suspended"?"המספרה הושבתה":"הבקשה נדחתה");
+  }catch{setToast("הפעולה נכשלה — בדקו שכללי Firestore עודכנו")}finally{setBusyUid(null)}
  }
- return <main className="app-shell">
+
+ return <main className="app-shell admin-console">
   <header className="app-header"><strong>פאנל ניהול</strong><button className="manage-link" onClick={onSignOut}>יציאה</button></header>
+  {openShop?<AdminShopDetail shop={openShop} busy={busyUid===openShop.owner?.uid} onBack={()=>setOpenShopId(null)} onStatus={setStatus}/>:
   <div className="screen">
-   <PageTitle title="בקשות הצטרפות" subtitle="אישור או דחייה של מספרות חדשות" onBack={onSignOut}/>
-   <section className="list-section">
-    {pending.length?pending.map(item=><article className="list-card" key={item.id}><div><h3>{item.shopName}</h3><p>{item.email} · {item.phone}</p></div><div className="appointment-actions"><button className="black-button" disabled={busyId===item.id} onClick={()=>decide(item,"approved")}>אישור</button><button onClick={()=>decide(item,"rejected")} disabled={busyId===item.id}>דחייה</button></div></article>):<div className="empty-state"><span>◷</span><h2>אין בקשות ממתינות</h2></div>}
-   </section>
-  </div>
+   <PageTitle title="ניהול מערכת" subtitle={loading?"טוען נתונים...":`${kpi.total} מספרות · ${kpi.clients} לקוחות · ${kpi.appts} תורים`} onBack={onSignOut}/>
+   <nav className="admin-tabs">{([["overview","סקירה"],["shops","מספרות"],["requests",`בקשות${pendingShops.length?` (${pendingShops.length})`:""}`]] as const).map(([key,label])=><button key={key} className={tab===key?"active":""} onClick={()=>setTab(key)}>{label}</button>)}</nav>
+
+   {tab==="overview"&&<section className="list-section">
+    <div className="admin-kpi-grid">
+     <div className="kpi-card"><b>{kpi.approved}</b><span>מספרות פעילות</span></div>
+     <div className="kpi-card"><b>{kpi.suspended}</b><span>מושבתות</span></div>
+     <div className="kpi-card"><b>{kpi.pending}</b><span>ממתינות לאישור</span></div>
+     <div className="kpi-card"><b>{kpi.clients}</b><span>סה״כ לקוחות</span></div>
+     <div className="kpi-card"><b>{kpi.appts}</b><span>סה״כ תורים</span></div>
+     <div className="kpi-card"><b>{kpi.upcoming}</b><span>תורים עתידיים</span></div>
+     <div className="kpi-card"><b>{kpi.thisWeek}</b><span>תורים השבוע</span></div>
+     <div className="kpi-card"><b>{kpi.activeWeek}</b><span>מספרות פעילות ב-7 ימים</span></div>
+    </div>
+    <h3 className="admin-section-h">המספרות הפעילות ביותר</h3>
+    {shops.slice(0,6).map(shop=><button className="shop-row" key={shop.shopId} onClick={()=>setOpenShopId(shop.shopId)}><div className="shop-row-main"><strong>{shop.name}</strong><small>{shop.clientCount} לקוחות · {shop.appts.length} תורים · {relativeFromSeconds(shop.lastActivitySec)}</small></div><span className={`shop-badge ${statusMeta[shop.status].cls}`}>{statusMeta[shop.status].label}</span></button>)}
+   </section>}
+
+   {tab==="shops"&&<section className="list-section">
+    <div className="admin-filter">{([["all","הכל"],["approved","פעילות"],["suspended","מושבתות"],["pending","ממתינות"]] as const).map(([key,label])=><button key={key} className={shopFilter===key?"active":""} onClick={()=>setShopFilter(key)}>{label}</button>)}</div>
+    {filteredShops.length?filteredShops.map(shop=><article className="shop-row wide" key={shop.shopId}>
+     <button className="shop-row-main" onClick={()=>setOpenShopId(shop.shopId)}><strong>{shop.name}</strong><small>קוד {shop.barberCode} · {shop.owner?.email||"ללא בעלים"}</small><small>{shop.clientCount} לקוחות · {shop.appts.length} תורים · {shop.upcoming} עתידיים · {relativeFromSeconds(shop.lastActivitySec)}</small></button>
+     <div className="shop-row-side"><span className={`shop-badge ${statusMeta[shop.status].cls}`}>{statusMeta[shop.status].label}</span>
+      <div className="shop-row-actions">
+       {shop.status==="pending"&&<><button className="black-button" disabled={busyUid===shop.owner?.uid} onClick={()=>setStatus(shop,"approved")}>אישור</button><button disabled={busyUid===shop.owner?.uid} onClick={()=>setStatus(shop,"rejected")}>דחייה</button></>}
+       {shop.status==="approved"&&<button disabled={busyUid===shop.owner?.uid} onClick={()=>setStatus(shop,"suspended")}>השבתה</button>}
+       {(shop.status==="suspended"||shop.status==="rejected")&&<button className="black-button" disabled={busyUid===shop.owner?.uid} onClick={()=>setStatus(shop,"approved")}>הפעלה</button>}
+      </div>
+     </div>
+    </article>):<div className="empty-state"><span>▦</span><h2>אין מספרות בקטגוריה הזו</h2></div>}
+   </section>}
+
+   {tab==="requests"&&<section className="list-section">
+    {pendingShops.length?pendingShops.map(shop=><article className="list-card" key={shop.shopId}><div><h3>{shop.name}</h3><p>{shop.owner?.email} · {shop.owner?.phone} · נרשם {fromSeconds(shop.createdAtSec)}</p></div><div className="appointment-actions"><button className="black-button" disabled={busyUid===shop.owner?.uid} onClick={()=>setStatus(shop,"approved")}>אישור</button><button disabled={busyUid===shop.owner?.uid} onClick={()=>setStatus(shop,"rejected")}>דחייה</button></div></article>):<div className="empty-state"><span>◷</span><h2>אין בקשות ממתינות</h2></div>}
+   </section>}
+  </div>}
   {toast&&<div className="toast">{toast}</div>}
- </main>
+ </main>;
+}
+
+function MiniBars({appts}:{appts:AdminAppointment[]}){
+ const days=Array.from({length:30},(_,index)=>{const date=new Date();date.setHours(12,0,0,0);date.setDate(date.getDate()-(29-index));return dateKey(date)});
+ const counts=days.map(key=>appts.filter(a=>a.date===key&&a.status!=="cancelled").length);
+ const max=Math.max(1,...counts);
+ return <div className="mini-bars" role="img" aria-label="תורים ב-30 הימים האחרונים">{counts.map((count,index)=><span key={days[index]} title={`${days[index]}: ${count} תורים`} className={count?"":"empty"} style={{height:`${Math.max(6,Math.round((count/max)*100))}%`}}/>)}</div>;
+}
+
+function AdminShopDetail({shop,busy,onBack,onStatus}:{shop:ShopView;busy:boolean;onBack:()=>void;onStatus:(shop:ShopView,status:"approved"|"suspended"|"rejected")=>void}){
+ const biz=shop.business?.business,schedule=shop.business?.schedule;
+ const recent=shop.appts.slice(0,20);
+ const thisMonth=shop.appts.filter(a=>a.status!=="cancelled"&&a.date>=dateKey(new Date(Date.now()-30*86400000))).length;
+ const noShowRate=shop.appts.length?Math.round((shop.cancelled/shop.appts.length)*100):0;
+ return <div className="screen shop-detail">
+  <PageTitle title={shop.name} subtitle={`קוד ${shop.barberCode} · ${shop.shopId}`} onBack={onBack}/>
+  <section className="list-section">
+   <div className="detail-status-row">
+    <span className={`shop-badge ${statusMeta[shop.status].cls}`}>{statusMeta[shop.status].label}</span>
+    {shop.status==="approved"&&<button disabled={busy} onClick={()=>onStatus(shop,"suspended")}>השבתת מספרה</button>}
+    {(shop.status==="suspended"||shop.status==="rejected")&&<button className="black-button" disabled={busy} onClick={()=>onStatus(shop,"approved")}>הפעלת מספרה</button>}
+    {shop.status==="pending"&&<><button className="black-button" disabled={busy} onClick={()=>onStatus(shop,"approved")}>אישור</button><button disabled={busy} onClick={()=>onStatus(shop,"rejected")}>דחייה</button></>}
+   </div>
+
+   <div className="admin-kpi-grid">
+    <div className="kpi-card"><b>{shop.clientCount}</b><span>לקוחות</span></div>
+    <div className="kpi-card"><b>{shop.appts.length}</b><span>סה״כ תורים</span></div>
+    <div className="kpi-card"><b>{shop.confirmed}</b><span>מאושרים</span></div>
+    <div className="kpi-card"><b>{shop.cancelled}</b><span>בוטלו ({noShowRate}%)</span></div>
+    <div className="kpi-card"><b>{shop.upcoming}</b><span>עתידיים</span></div>
+    <div className="kpi-card"><b>{shop.thisWeek}</b><span>השבוע</span></div>
+    <div className="kpi-card"><b>{thisMonth}</b><span>ב-30 יום</span></div>
+    <div className="kpi-card"><b>{(shop.business?.gallery||[]).length}</b><span>תמונות</span></div>
+   </div>
+
+   <h3 className="admin-section-h">תורים ב-30 הימים האחרונים</h3>
+   <MiniBars appts={shop.appts}/>
+
+   <h3 className="admin-section-h">פרטי בעלים</h3>
+   <div className="detail-grid">
+    <div><span>אימייל</span><b>{shop.owner?.email||"—"}</b></div>
+    <div><span>טלפון</span><b>{shop.owner?.phone||"—"}</b></div>
+    <div><span>נרשם</span><b>{fromSeconds(shop.createdAtSec)}</b></div>
+    <div><span>פעילות אחרונה</span><b>{relativeFromSeconds(shop.lastActivitySec)}</b></div>
+   </div>
+
+   <h3 className="admin-section-h">פרטי עסק</h3>
+   <div className="detail-grid">
+    <div><span>שם תצוגה</span><b>{biz?.name||"—"}</b></div>
+    <div><span>טלפון</span><b>{biz?.phone||"—"}</b></div>
+    <div><span>WhatsApp</span><b>{biz?.whatsapp||"—"}</b></div>
+    <div><span>כתובת</span><b>{biz?.address||"—"}</b></div>
+    <div><span>שעות</span><b>{biz?.hours||"—"}</b></div>
+    <div><span>שירותים / מוצרים</span><b>{(shop.business?.prices||[]).length} / {(shop.business?.products||[]).length}</b></div>
+   </div>
+
+   {schedule&&<><h3 className="admin-section-h">לוח עבודה</h3><div className="detail-schedule">{dayNames.map((name,index)=>{const day=schedule.days?.[index];return <div key={index} className={day?.enabled?"on":"off"}><span>{name}</span><b>{day?.enabled?`${day.start}–${day.end} · ${day.slots} תורים`:"סגור"}</b></div>})}</div></>}
+
+   <h3 className="admin-section-h">תורים אחרונים</h3>
+   {recent.length?<div className="detail-table"><div className="dt-head"><span>תאריך</span><span>שעה</span><span>שירות</span><span>לקוח</span><span>סטטוס</span></div>{recent.map(a=><div className="dt-row" key={a.id}><span>{a.date}</span><span>{a.time}</span><span>{a.service||"—"}</span><span>{a.clientName||"—"}<small>{a.clientPhone}</small></span><span className={`dt-status ${a.status}`}>{apptStatusLabel(a.status)}</span></div>)}</div>:<div className="empty-state"><span>◷</span><h2>אין תורים למספרה זו</h2></div>}
+  </section>
+ </div>;
 }
 function PageTitle({title,subtitle,onBack}:{title:string;subtitle:string;onBack:()=>void}){return <header className="page-title"><button onClick={onBack} aria-label="חזרה">‹</button><div><small>{subtitle}</small><h1>{title}</h1></div><span/></header>}
 function ScheduleEditor({schedule,setSchedule,onSave}:{schedule:Schedule;setSchedule:React.Dispatch<React.SetStateAction<Schedule>>;onSave:()=>void}){const updateDay=(index:number,next:Partial<WorkDay>)=>setSchedule(current=>({...current,days:{...current.days,[index]:{...current.days[index],...next}}}));return <section className="schedule-editor">{dayNames.map((name,index)=>{const day=schedule.days[index],maxSlots=Math.max(1,Math.floor((timeToMinutes(day.end)-timeToMinutes(day.start))/30));return <article className={`workday-row ${day.enabled?"enabled":""}`} key={index}><label className="day-toggle"><input type="checkbox" checked={day.enabled} onChange={event=>updateDay(index,{enabled:event.target.checked,slots:event.target.checked?Math.max(1,day.slots):0})}/><span>{name}</span></label><div className="workday-times"><label>פתיחה<input type="time" step="300" value={day.start} disabled={!day.enabled} onChange={event=>updateDay(index,{start:event.target.value})}/></label><label>סיום<input type="time" step="300" value={day.end} disabled={!day.enabled} onChange={event=>updateDay(index,{end:event.target.value})}/></label><label>תורים<input type="number" min="1" max={maxSlots} value={day.enabled?day.slots:0} disabled={!day.enabled} onChange={event=>updateDay(index,{slots:Math.min(maxSlots,Math.max(1,Number(event.target.value)))})}/></label></div></article>})}<button className="black-button wide" type="button" onClick={onSave}>שמירת שעות העבודה</button></section>}

@@ -22,6 +22,12 @@ service cloud.firestore {
       return signedIn() && userProfile().data.role == "barber";
     }
 
+    // A barber whose account has been approved and not later suspended.
+    function activeBarber() {
+      return isBarber()
+        && userProfile().data.get("status", "approved") == "approved";
+    }
+
     function userShopId() {
       return userProfile().data.keys().hasAny(["shopId"])
         ? userProfile().data.shopId
@@ -39,11 +45,11 @@ service cloud.firestore {
     }
 
     function barberOwnsShop(shopId) {
-      return isBarber() && userShopId() == shopId;
+      return activeBarber() && userShopId() == shopId;
     }
 
     function barberOwnsData(data) {
-      return isBarber() && userShopId() == dataShopId(data);
+      return activeBarber() && userShopId() == dataShopId(data);
     }
 
     match /barberCodes/{code} {
@@ -57,7 +63,7 @@ service cloud.firestore {
         && request.resource.data.shopId == userShopId()
         && !exists(/databases/$(database)/documents/barberCodes/$(code));
       allow update: if false;
-      allow delete: if isBarber() && resource.data.shopId == userShopId();
+      allow delete: if activeBarber() && resource.data.shopId == userShopId();
     }
 
     match /users/{userId} {
@@ -75,7 +81,7 @@ service cloud.firestore {
           : (request.resource.data.keys().hasAll(["barberCode"])
             && exists(/databases/$(database)/documents/barberCodes/$(request.resource.data.barberCode))
             && get(/databases/$(database)/documents/barberCodes/$(request.resource.data.barberCode)).data.shopId == request.resource.data.shopId));
-      allow read: if isOwner(userId);
+      allow read: if isOwner(userId) || admin();
       allow update: if (
           isOwner(userId)
           && request.resource.data.role == resource.data.role
@@ -93,11 +99,11 @@ service cloud.firestore {
             )
           )
         ) || (
-          // Only the admin may move a pending barber to approved/rejected.
+          // The admin may move any barber account between approved / rejected
+          // / suspended (approve a request, or suspend / re-activate a shop).
           admin()
           && resource.data.role == "barber"
-          && resource.data.get("status", "approved") == "pending"
-          && request.resource.data.status in ["approved", "rejected"]
+          && request.resource.data.status in ["approved", "rejected", "suspended"]
           && request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(["status", "updatedAt"])
         );
@@ -105,7 +111,7 @@ service cloud.firestore {
     }
 
     match /businesses/{businessId} {
-      allow read: if signedIn() && userShopId() == businessId;
+      allow read: if admin() || (signedIn() && userShopId() == businessId);
       // A shop can only be created once its owning barber account is approved.
       allow create: if barberOwnsShop(businessId)
         && userProfile().data.get("status", "approved") == "approved";
@@ -127,7 +133,8 @@ service cloud.firestore {
     }
 
     match /appointments/{appointmentId} {
-      allow read: if barberOwnsData(resource.data)
+      allow read: if admin()
+        || barberOwnsData(resource.data)
         || (signedIn()
           && resource.data.clientId == request.auth.uid
           && belongsToUserShop(resource.data));
@@ -155,7 +162,7 @@ service cloud.firestore {
     }
 
     match /availability/{slotId} {
-      allow read: if signedIn() && belongsToUserShop(resource.data);
+      allow read: if admin() || (signedIn() && belongsToUserShop(resource.data));
 
       allow create: if barberOwnsData(request.resource.data)
         || (signedIn()
