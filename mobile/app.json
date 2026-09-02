@@ -1,0 +1,35 @@
+{
+  "expo": {
+    "name": "BARBERS",
+    "slug": "barbers-liav",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "barbers",
+    "icon": "./assets/barbers-logo.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.liav.barbers"
+    },
+    "android": {
+      "package": "com.liav.barbers",
+      "adaptiveIcon": {
+        "backgroundColor": "#F2EFE9",
+        "foregroundImage": "./assets/barbers-logo.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/barbers-logo.png"
+    },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "האפליקציה זקוקה לגישה לתמונות כדי לעדכן את גלריית המספרה.",
+          "microphonePermission": false
+        }
+      ]
+    ]
+  }
+}
