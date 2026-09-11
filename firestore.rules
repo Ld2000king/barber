@@ -46,6 +46,55 @@ service cloud.firestore {
       return isBarber() && userShopId() == dataShopId(data);
     }
 
+    // ---- Appointment swaps ("החלפת תורים") -------------------------------
+    // A swap is executed by the user who accepts an offer, so that user has to
+    // write the counterpart's appointment too. These helpers read the accepted
+    // offer (inside the same transaction, hence getAfter) and only authorize
+    // writes that match exactly what the offer says both sides agreed to.
+    function acceptedOffer(offerId) {
+      return getAfter(/databases/$(database)/documents/swapOffers/$(offerId)).data;
+    }
+
+    function runsSwap(offer) {
+      return signedIn()
+        && offer.status == "accepted"
+        && (offer.toUserId == request.auth.uid || barberOwnsData(offer));
+    }
+
+    function swapMovesAppointment(offerId, appointmentId, newData, oldData) {
+      let offer = acceptedOffer(offerId);
+      return runsSwap(offer)
+        && dataShopId(offer) == dataShopId(oldData)
+        && oldData.status != "cancelled"
+        && (
+          (offer.fromAppointmentId == appointmentId
+            && newData.date == offer.toDate
+            && newData.time == offer.toTime
+            && newData.slotId == offer.toSlotId)
+          || (offer.toAppointmentId == appointmentId
+            && newData.date == offer.fromDate
+            && newData.time == offer.fromTime
+            && newData.slotId == offer.fromSlotId)
+        );
+    }
+
+    function swapMovesSlot(offerId, slotId, newData, oldData) {
+      let offer = acceptedOffer(offerId);
+      return runsSwap(offer)
+        && dataShopId(offer) == dataShopId(oldData)
+        && (
+          (offer.fromSlotId == slotId && newData.appointmentId == offer.toAppointmentId)
+          || (offer.toSlotId == slotId && newData.appointmentId == offer.fromAppointmentId)
+        );
+    }
+
+    function swapClosesListing(offerId, listingId, listingData) {
+      let offer = acceptedOffer(offerId);
+      return runsSwap(offer)
+        && dataShopId(offer) == dataShopId(listingData)
+        && (offer.fromListingId == listingId || offer.toListingId == listingId);
+    }
+
     match /barberCodes/{code} {
       // Shop codes are intentionally readable before login so a new client can
       // resolve the correct shop before creating their account.
@@ -149,7 +198,12 @@ service cloud.firestore {
           && dataShopId(request.resource.data) == dataShopId(resource.data)
           && request.resource.data.status == "cancelled"
           && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(["status", "updatedAt"]));
+            .hasOnly(["status", "updatedAt"]))
+        || (signedIn()
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(["date", "time", "slotId", "swapOfferId", "updatedAt"])
+          && swapMovesAppointment(request.resource.data.swapOfferId, appointmentId,
+            request.resource.data, resource.data));
 
       allow delete: if barberOwnsData(resource.data);
     }
@@ -165,14 +219,140 @@ service cloud.firestore {
           && getAfter(/databases/$(database)/documents/appointments/$(request.resource.data.appointmentId)).data.slotId == slotId
           && dataShopId(getAfter(/databases/$(database)/documents/appointments/$(request.resource.data.appointmentId)).data) == userShopId());
 
-      allow update: if barberOwnsData(resource.data)
-        && dataShopId(request.resource.data) == dataShopId(resource.data);
+      allow update: if (barberOwnsData(resource.data)
+          && dataShopId(request.resource.data) == dataShopId(resource.data))
+        || (signedIn()
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(["appointmentId", "swapOfferId", "updatedAt"])
+          && swapMovesSlot(request.resource.data.swapOfferId, slotId,
+            request.resource.data, resource.data));
 
       allow delete: if barberOwnsData(resource.data)
         || (signedIn()
           && belongsToUserShop(resource.data)
           && getAfter(/databases/$(database)/documents/appointments/$(resource.data.appointmentId)).data.clientId == request.auth.uid
           && getAfter(/databases/$(database)/documents/appointments/$(resource.data.appointmentId)).data.status == "cancelled");
+    }
+
+    // An appointment offered for swap. The document id is the appointment id,
+    // so an appointment can never be listed twice.
+    match /swapListings/{appointmentId} {
+      function listedAppointment() {
+        return get(/databases/$(database)/documents/appointments/$(appointmentId)).data;
+      }
+
+      // The listing must describe the real appointment it points at, so an
+      // offer built from it can be trusted later on.
+      function describesAppointment(data) {
+        let appointment = listedAppointment();
+        return data.appointmentId == appointmentId
+          && data.status == "open"
+          && data.date == appointment.date
+          && data.time == appointment.time
+          && data.slotId == appointment.slotId
+          && appointment.status == "confirmed"
+          && dataShopId(data) == dataShopId(appointment);
+      }
+
+      function listsOwnAppointment(data) {
+        return signedIn()
+          && data.ownerId == request.auth.uid
+          && listedAppointment().clientId == request.auth.uid
+          && dataShopId(data) == userShopId();
+      }
+
+      allow read: if signedIn() && belongsToUserShop(resource.data);
+
+      allow create: if describesAppointment(request.resource.data)
+        && (listsOwnAppointment(request.resource.data)
+          || barberOwnsData(request.resource.data));
+
+      allow update: if (
+          // Re-listing an appointment that was swapped or pulled back.
+          describesAppointment(request.resource.data)
+          && (listsOwnAppointment(request.resource.data)
+            || barberOwnsData(request.resource.data))
+        ) || (
+          // Whoever accepts an offer closes both sides of it.
+          request.resource.data.status == "swapped"
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(["status", "swapOfferId", "updatedAt"])
+          && swapClosesListing(request.resource.data.swapOfferId, appointmentId,
+            resource.data)
+        );
+
+      allow delete: if signedIn()
+        && (resource.data.ownerId == request.auth.uid
+          || barberOwnsData(resource.data));
+    }
+
+    // A proposal to trade one open listing for another.
+    match /swapOffers/{offerId} {
+      function listing(listingId) {
+        return get(/databases/$(database)/documents/swapListings/$(listingId)).data;
+      }
+
+      // Both halves of the offer must mirror the listings they name, so the
+      // accepting side cannot be tricked into moving an unrelated appointment.
+      function mirrorsListings(data) {
+        let fromListing = listing(data.fromListingId);
+        let toListing = listing(data.toListingId);
+        return data.fromListingId != data.toListingId
+          && fromListing.status == "open"
+          && toListing.status == "open"
+          && fromListing.ownerId == data.fromUserId
+          && fromListing.appointmentId == data.fromAppointmentId
+          && fromListing.date == data.fromDate
+          && fromListing.time == data.fromTime
+          && fromListing.slotId == data.fromSlotId
+          && toListing.ownerId == data.toUserId
+          && toListing.appointmentId == data.toAppointmentId
+          && toListing.date == data.toDate
+          && toListing.time == data.toTime
+          && toListing.slotId == data.toSlotId
+          && dataShopId(fromListing) == dataShopId(data)
+          && dataShopId(toListing) == dataShopId(data);
+      }
+
+      allow read: if signedIn()
+        && (resource.data.fromUserId == request.auth.uid
+          || resource.data.toUserId == request.auth.uid
+          || barberOwnsData(resource.data));
+
+      allow create: if signedIn()
+        && request.resource.data.status == "pending"
+        && request.resource.data.fromUserId != request.resource.data.toUserId
+        && (request.resource.data.fromUserId == request.auth.uid
+          || barberOwnsData(request.resource.data))
+        // Answers are due within three hours; the window is set at creation
+        // and checked again on every answer.
+        && request.resource.data.expiresAt is timestamp
+        && request.resource.data.expiresAt > request.time
+        && request.resource.data.expiresAt < request.time + duration.value(4, 'h')
+        && mirrorsListings(request.resource.data);
+
+      allow update: if signedIn()
+        && resource.data.status == "pending"
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(["status", "resolvedAt"])
+        && (
+          // The receiving side answers, but only while the offer is still live.
+          ((resource.data.toUserId == request.auth.uid
+              || barberOwnsData(resource.data))
+            && request.resource.data.status in ["accepted", "declined"]
+            && resource.data.expiresAt > request.time)
+          // Either side records an offer nobody answered in time.
+          || (request.resource.data.status == "expired"
+            && resource.data.expiresAt < request.time
+            && (resource.data.fromUserId == request.auth.uid
+              || resource.data.toUserId == request.auth.uid
+              || barberOwnsData(resource.data)))
+          // The sender withdraws it.
+          || (request.resource.data.status == "cancelled"
+            && resource.data.fromUserId == request.auth.uid)
+        );
+
+      allow delete: if false;
     }
 
     match /services/{serviceId} {
