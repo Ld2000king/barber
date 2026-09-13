@@ -89,3 +89,31 @@
 .dt-status.confirmed{color:#1c6b43;font-weight:800}
 .dt-status.cancelled{color:#8b302a;text-decoration:line-through}
 @media(max-width:520px){.admin-kpi-grid{grid-template-columns:repeat(2,1fr)}.dt-head,.dt-row{grid-template-columns:.8fr .5fr 1fr 1fr;font-size:11px}.dt-head span:nth-child(3),.dt-row span:nth-child(3){display:none}}
+
+/* "מתאים לך?" — swap board */
+.bottom-nav{grid-template-columns:repeat(5,1fr)}
+.bottom-nav span{font-size:9.5px;text-align:center;line-height:1.2}
+.swap-intro{padding:16px 18px;border-radius:18px;background:linear-gradient(145deg,#e7eef0,#eee5d8);box-shadow:var(--shadow-sm);margin-bottom:16px}
+.swap-intro strong{display:block;font-size:15px;color:var(--steel-deep)}
+.swap-intro p{margin:7px 0 0;color:var(--muted);font-size:12px;line-height:1.6}
+.swap-board>.black-button{margin:0 0 18px}
+.swap-card{display:grid;grid-template-columns:66px minmax(0,1fr) auto;align-items:center;gap:12px;padding:14px;margin-bottom:10px;border:1px solid var(--line);border-radius:16px;background:#fff;box-shadow:var(--shadow-sm)}
+.swap-card.mine{border-color:var(--sand);background:linear-gradient(145deg,#fdf8f0,#fff)}
+.swap-card.done{opacity:.55;box-shadow:none}
+.swap-when{display:flex;flex-direction:column}
+.swap-when b{font-size:19px;color:var(--steel-deep)}
+.swap-when small{margin-top:2px;color:var(--muted);font-size:11px}
+.swap-body{min-width:0}
+.swap-body h3{margin:0;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.swap-body p{margin:3px 0 0;color:var(--muted);font-size:11px}
+.swap-actions{display:flex;flex-direction:column;gap:6px}
+.swap-actions button{min-height:38px;padding:0 14px;border-radius:9px;font-size:12px;font-weight:800;cursor:pointer}
+.swap-actions button:not(.black-button){border:1px solid var(--line);background:#fff;color:var(--ink)}
+.swap-actions button:disabled{opacity:.55;cursor:not-allowed}
+.swap-picker{display:flex;flex-direction:column;gap:10px;margin-top:22px}
+.swap-pick-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 14px;border-radius:14px;background:var(--paper)}
+.swap-pick-row div{display:flex;flex-direction:column;min-width:0}
+.swap-pick-row strong{font-size:14px}
+.swap-pick-row small{margin-top:3px;color:var(--muted);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.swap-pick-row .black-button{min-height:40px;padding:0 18px;flex:0 0 auto}
+@media(max-width:380px){.swap-card{grid-template-columns:58px minmax(0,1fr) auto;gap:9px;padding:12px}.swap-actions button{padding:0 10px;font-size:11px}}

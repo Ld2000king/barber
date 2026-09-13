@@ -2,14 +2,14 @@
 
 import {ChangeEvent,FormEvent,useEffect,useMemo,useRef,useState} from "react";
 import {createUserWithEmailAndPassword,onAuthStateChanged,signInWithEmailAndPassword,signOut as firebaseSignOut} from "firebase/auth";
-import {collection,doc,getDoc,onSnapshot,query,runTransaction,serverTimestamp,setDoc,where,writeBatch} from "firebase/firestore";
+import {collection,deleteDoc,doc,getDoc,onSnapshot,query,runTransaction,serverTimestamp,setDoc,where,writeBatch} from "firebase/firestore";
 import emailjs from "@emailjs/browser";
 import {auth,db} from "../lib/firebase";
 
 type PriceItem={id:string;name:string;price:number;note:string};
 type Product={id:string;name:string;price:number;description:string;image?:string};
 type Business={name:string;tagline:string;phone:string;whatsapp:string;address:string;mapQuery:string;hours:string};
-type Tab="home"|"prices"|"gallery"|"products"|"appointments";
+type Tab="home"|"prices"|"gallery"|"products"|"appointments"|"swaps";
 type Role="barber"|"client";
 type ApprovalStatus="pending"|"approved"|"rejected"|"suspended";
 type Session={uid:string;role:Role;phone:string;email:string;shopId:string;approvalStatus:ApprovalStatus;shopName?:string};
@@ -23,6 +23,7 @@ type Appointment={id:string;shopId?:string;clientId?:string;clientName?:string;c
 type WorkDay={enabled:boolean;start:string;end:string;slots:number};
 type Schedule={days:Record<number,WorkDay>;minDuration:number};
 type OccupiedSlot={id:string;shopId?:string;date:string;time:string;status:"booked"};
+type SwapListing={id:string;shopId:string;appointmentId:string;ownerId:string;ownerPhone:string;service:string;date:string;time:string;status:"open"|"taken";postedBy:Role;takenBy?:string;takenAt?:{seconds:number}};
 
 const DEFAULT_SHOP_ID="ari-cohen";
 const ADMIN_EMAIL="liavdimri12@gmail.com";
@@ -53,11 +54,12 @@ const defaultSchedule:Schedule={minDuration:30,days:{0:{enabled:true,start:"09:0
 const dayNames=["א׳","ב׳","ג׳","ד׳","ה׳","ו׳","שבת"];
 const uid=()=>Math.random().toString(36).slice(2,9);
 const money=(value:number)=>`${value.toLocaleString("he-IL")} ₪`;
-const icons={home:"⌂",prices:"₪",gallery:"▦",products:"◈",appointments:"◷",pin:"⌖",clock:"◷",phone:"⌕",back:"‹"};
+const icons={home:"⌂",prices:"₪",gallery:"▦",products:"◈",appointments:"◷",swaps:"⇄",pin:"⌖",clock:"◷",phone:"⌕",back:"‹"};
 const dateKey=(date:Date)=>`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;
 const timeToMinutes=(time:string)=>{const [hours,minutes]=time.split(":").map(Number);return hours*60+minutes};
 const minutesToTime=(value:number)=>`${String(Math.floor(value/60)).padStart(2,"0")}:${String(value%60).padStart(2,"0")}`;
 const slotId=(shopId:string,date:string,time:string)=>`${shopId}__${date}_${time.replace(":","")}`;
+const swapDateLabel=(key:string)=>{const [year,month,day]=key.split("-").map(Number);if(!year||!month||!day)return key;return `${dayNames[new Date(year,month-1,day).getDay()]} · ${day}/${month}`};
 async function reserveBarberCode(shopId:string){for(let attempt=0;attempt<12;attempt++){const code=makeBarberCode(),codeRef=doc(db,"barberCodes",code);try{await runTransaction(db,async transaction=>{const existing=await transaction.get(codeRef);if(existing.exists())throw new Error("shop-code-taken");transaction.set(codeRef,{shopId,createdAt:serverTimestamp()})});return code}catch(error){if(String((error as Error).message).includes("shop-code-taken"))continue;throw error}}throw new Error("shop-code-generation-failed")}
 function generateSlots(day:WorkDay){if(!day?.enabled||day.slots<1)return[];const start=timeToMinutes(day.start),end=timeToMinutes(day.end),duration=end-start,maxSlots=Math.max(0,Math.floor(duration/30)),count=Math.min(Math.max(1,day.slots),maxSlots);if(!count)return[];if(count===1)return[minutesToTime(start)];const rawStep=(duration-30)/(count-1),result:string[]=[];for(let index=0;index<count;index++){const rounded=Math.round((start+index*rawStep)/5)*5,value=Math.min(rounded,end-30),time=minutesToTime(value);if(!result.includes(time))result.push(time)}return result}
 function compressImage(file:File,max=720,quality=.68){return new Promise<string>((resolve,reject)=>{const image=new Image(),reader=new FileReader();reader.onload=()=>{image.onload=()=>{const scale=Math.min(1,max/Math.max(image.width,image.height)),canvas=document.createElement("canvas");canvas.width=Math.round(image.width*scale);canvas.height=Math.round(image.height*scale);canvas.getContext("2d")?.drawImage(image,0,0,canvas.width,canvas.height);resolve(canvas.toDataURL("image/jpeg",quality))};image.onerror=reject;image.src=String(reader.result)};reader.onerror=reject;reader.readAsDataURL(file)})}
@@ -68,6 +70,7 @@ export default function Home(){
  const [tab,setTab]=useState<Tab>("home"),[adminOpen,setAdminOpen]=useState(false),[bookingOpen,setBookingOpen]=useState(false),[toast,setToast]=useState("");
  const [session,setSession]=useState<Session|null>(null),[isAdmin,setIsAdmin]=useState(false),[roleChoice,setRoleChoice]=useState<Role|null>(null),[appointments,setAppointments]=useState<Appointment[]>([]),[occupiedSlots,setOccupiedSlots]=useState<OccupiedSlot[]>([]);
  const [bookingDate,setBookingDate]=useState(""),[bookingTime,setBookingTime]=useState("");
+ const [swaps,setSwaps]=useState<SwapListing[]>([]),[swapPickerOpen,setSwapPickerOpen]=useState(false),[swapBusy,setSwapBusy]=useState<string|null>(null);
  const [authMode,setAuthMode]=useState<"login"|"register">("register"),[authBusy,setAuthBusy]=useState(true),[authErrors,setAuthErrors]=useState<AuthErrors>({});
  const [adminTab,setAdminTab]=useState<"details"|"schedule"|"prices"|"products"|"gallery"|"broadcast">("details");
  const fileInput=useRef<HTMLInputElement>(null);
@@ -82,6 +85,8 @@ export default function Home(){
 
  useEffect(()=>{if(!session)return;const availabilityQuery=query(collection(db,"availability"),where("shopId","==",shopId));return onSnapshot(availabilityQuery,snapshot=>setOccupiedSlots(snapshot.docs.map(item=>({id:item.id,...item.data()} as OccupiedSlot))),()=>setToast("לא הצלחנו לטעון את זמינות התורים"))},[session?.uid,shopId]);
 
+ useEffect(()=>{if(!session)return;const swapsQuery=query(collection(db,"swaps"),where("shopId","==",shopId));return onSnapshot(swapsQuery,snapshot=>{const list=snapshot.docs.map(item=>({id:item.id,...item.data()} as SwapListing));list.sort((a,b)=>`${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`));setSwaps(list)},()=>setToast("לא הצלחנו לטעון את לוח ההחלפות"))},[session?.uid,shopId]);
+
  useEffect(()=>{try{localStorage.setItem(`barbera-content-v3:${shopId}`,JSON.stringify({business,prices,products,gallery,schedule}))}catch{setToast("אין מספיק מקום לשמירת תמונות נוספות")}},[business,prices,products,gallery,schedule,shopId]);
  useEffect(()=>{if(!toast)return;const timer=setTimeout(()=>setToast(""),2300);return()=>clearTimeout(timer)},[toast]);
 
@@ -90,6 +95,11 @@ export default function Home(){
  const selectedDay=bookingDays.find(day=>day.key===bookingDate),daySlots=selectedDay?generateSlots(schedule.days[selectedDay.dayIndex]):[];
  const busySlotIds=useMemo(()=>new Set([...occupiedSlots.filter(slot=>slot.shopId===shopId).map(slot=>slot.id),...appointments.filter(item=>item.status!=="cancelled"&&item.shopId===shopId).map(item=>slotId(shopId,item.date,item.time))]),[occupiedSlots,appointments,shopId]);
  useEffect(()=>{if(!bookingOpen)return;const next=bookingDays.find(day=>day.key===bookingDate)??bookingDays[0];setBookingDate(next?.key??"");setBookingTime("")},[bookingOpen,bookingDays,bookingDate]);
+
+ const openSwaps=useMemo(()=>swaps.filter(item=>item.status==="open"&&item.date>=todayKey()),[swaps]);
+ const takenSwaps=useMemo(()=>swaps.filter(item=>item.status==="taken").slice(-5).reverse(),[swaps]);
+ const listedAppointmentIds=useMemo(()=>new Set(swaps.filter(item=>item.status==="open").map(item=>item.appointmentId)),[swaps]);
+ const swappableAppointments=useMemo(()=>appointments.filter(item=>item.status==="confirmed"&&item.date>=todayKey()&&!listedAppointmentIds.has(item.id)),[appointments,listedAppointmentIds]);
 
  function openTab(next:Tab){setTab(next);window.scrollTo({top:0,behavior:"smooth"})}
  function handleImages(e:ChangeEvent<HTMLInputElement>){if(session?.role!=="barber"){e.target.value="";return}const files=Array.from(e.target.files??[]).slice(0,Math.max(0,8-gallery.length));Promise.all(files.map(file=>compressImage(file))).then(images=>{setGallery(current=>{const next=[...current,...images].slice(0,8);saveCloudContent({gallery:next}).then(()=>setToast("התמונות עלו לגלריה")).catch(()=>setToast("לא הצלחנו לשמור את התמונות בענן"));return next})}).catch(()=>setToast("לא הצלחנו לקרוא את התמונה"));e.target.value=""}
@@ -144,7 +154,35 @@ export default function Home(){
  async function signOut(){await firebaseSignOut(auth);setSession(null);setIsAdmin(false);setRoleChoice(null);setBarberCode("");setTab("home")}
 
  async function sendBooking(e:FormEvent<HTMLFormElement>){e.preventDefault();if(!session||!bookingDate||!bookingTime){setToast("בחרו יום ושעה פנויה");return}const v=new FormData(e.currentTarget),service=prices.find(item=>item.id===v.get("service")),appointmentRef=doc(collection(db,"appointments")),currentSlotId=slotId(shopId,bookingDate,bookingTime),availabilityRef=doc(db,"availability",currentSlotId),barberPhone=String(v.get("clientPhone")??"").replace(/\D/g,""),barberName=String(v.get("clientName")??"").trim();if(session.role==="barber"&&(!barberName||!/^(05\d{8}|9725\d{8})$/.test(barberPhone))){setToast("יש להזין שם ומספר טלפון תקין של הלקוח");return}try{const batch=writeBatch(db);batch.set(appointmentRef,{shopId,clientId:session.role==="client"?session.uid:"",clientName:session.role==="barber"?barberName:"",clientPhone:session.role==="barber"?barberPhone:session.phone,clientEmail:session.role==="client"?session.email:"",createdBy:session.role,service:service?.name??"",date:bookingDate,time:bookingTime,slotId:currentSlotId,status:"confirmed",createdAt:serverTimestamp(),updatedAt:serverTimestamp()});batch.set(availabilityRef,{shopId,date:bookingDate,time:bookingTime,status:"booked",appointmentId:appointmentRef.id,updatedAt:serverTimestamp()});await batch.commit();setBookingOpen(false);setBookingTime("");setToast(session.role==="barber"?"התור נקבע ללקוח ונשמר ביומן":"התור נקבע בהצלחה ונשמר ביומן")}catch(error){const message=String((error as {code?:string;message?:string}).code??(error as Error).message??"");setToast(message.includes("already-exists")||message.includes("permission-denied")?"התור נתפס כרגע — בחרו שעה ירוקה אחרת":"לא הצלחנו לשמור את התור")}}
- async function cancelAppointment(item:Appointment){if(!session||item.status==="cancelled")return;if(session.role==="client"&&item.clientId!==session.uid)return;try{await runTransaction(db,async transaction=>{const availabilityRef=doc(db,"availability",slotId(shopId,item.date,item.time)),availability=await transaction.get(availabilityRef);transaction.update(doc(db,"appointments",item.id),{status:"cancelled",updatedAt:serverTimestamp()});if(availability.exists())transaction.delete(availabilityRef)});setToast("התור בוטל והשעה חזרה להיות פנויה")}catch{setToast("לא הצלחנו לבטל את התור")}}
+ async function cancelAppointment(item:Appointment){if(!session||item.status==="cancelled")return;if(session.role==="client"&&item.clientId!==session.uid)return;try{await runTransaction(db,async transaction=>{const availabilityRef=doc(db,"availability",slotId(shopId,item.date,item.time)),availability=await transaction.get(availabilityRef);transaction.update(doc(db,"appointments",item.id),{status:"cancelled",updatedAt:serverTimestamp()});if(availability.exists())transaction.delete(availabilityRef)});await deleteDoc(doc(db,"swaps",item.id)).catch(()=>undefined);setToast("התור בוטל והשעה חזרה להיות פנויה")}catch{setToast("לא הצלחנו לבטל את התור")}}
+
+ async function postSwap(item:Appointment){
+  if(!session)return;
+  if(item.status!=="confirmed"||item.date<todayKey()){setToast("אפשר להעלות ללוח רק תור עתידי פעיל");return}
+  setSwapBusy(item.id);
+  try{
+   await setDoc(doc(db,"swaps",item.id),{shopId,appointmentId:item.id,ownerId:item.clientId||"",ownerPhone:item.clientPhone||"",service:item.service||"",date:item.date,time:item.time,status:"open",postedBy:session.role,createdAt:serverTimestamp()});
+   setSwapPickerOpen(false);
+   setToast("התור עלה ללוח ההחלפות");
+  }catch{setToast("לא הצלחנו להעלות את התור ללוח")}finally{setSwapBusy(null)}
+ }
+ async function takeSwap(listing:SwapListing){
+  if(!session||session.role!=="client"||listing.ownerId===session.uid)return;
+  setSwapBusy(listing.id);
+  try{
+   const batch=writeBatch(db);
+   batch.update(doc(db,"appointments",listing.appointmentId),{clientId:session.uid,clientName:"",clientPhone:session.phone,clientEmail:session.email,updatedAt:serverTimestamp()});
+   batch.update(doc(db,"swaps",listing.id),{status:"taken",takenBy:session.uid,takenByPhone:session.phone,takenAt:serverTimestamp()});
+   await batch.commit();
+   setToast("התור עבר אליך — אפשר לראות אותו ב״התורים שלי״");
+  }catch{setToast("התור כבר נתפס. בחרו תור אחר מהלוח")}finally{setSwapBusy(null)}
+ }
+ async function removeSwap(listing:SwapListing){
+  if(!session)return;
+  setSwapBusy(listing.id);
+  try{await deleteDoc(doc(db,"swaps",listing.id));setToast("התור הוסר מהלוח")}
+  catch{setToast("לא הצלחנו להסיר את התור מהלוח")}finally{setSwapBusy(null)}
+ }
 
  const setPricesSynced:React.Dispatch<React.SetStateAction<PriceItem[]>>=update=>setPrices(current=>{const next=typeof update==="function"?update(current):update;saveCloudContent({prices:next}).catch(()=>setToast("לא הצלחנו לשמור את המחירון"));return next});
  const setProductsSynced:React.Dispatch<React.SetStateAction<Product[]>>=update=>setProducts(current=>{const next=typeof update==="function"?update(current):update;saveCloudContent({products:next}).catch(()=>setToast("לא הצלחנו לשמור את המוצרים"));return next});
@@ -163,11 +201,27 @@ export default function Home(){
   {tab==="prices"&&<div className="screen"><PageTitle title="מחירון" subtitle="כל השירותים, בלי הפתעות" onBack={()=>openTab("home")}/><section className="list-section">{prices.map((item,index)=><article className="list-card" key={item.id}><span className="number">{String(index+1).padStart(2,"0")}</span><div><h3>{item.name}</h3><p>{item.note}</p></div><strong>{money(item.price)}</strong></article>)}<button className="black-button wide" onClick={()=>setBookingOpen(true)}>קביעת תור</button></section></div>}
   {tab==="gallery"&&<div className="screen"><PageTitle title="הגלריה" subtitle={`תיק העבודות של ${business.name}`} onBack={()=>openTab("home")}/>{gallery.length?<section className="photo-grid">{gallery.map((image,index)=><div key={index} className={`gallery-photo ${image===demoPhoto?`preset-photo preset-${index%4+1}`:""}`} style={{backgroundImage:`url(${image})`}} role="img" aria-label={`עבודה ${index+1}`}/>)}</section>:<section className="empty-state"><span>▦</span><h2>עוד אין כאן תמונות</h2></section>}</div>}
   {tab==="products"&&<div className="screen"><PageTitle title="המוצרים שלנו" subtitle="להמשיך את הלוק גם בבית" onBack={()=>openTab("home")}/><section className="products-grid">{products.map((product,index)=><article className="product-card" key={product.id}>{product.image?<img className="product-image" src={product.image} alt={product.name}/>:<div className={`product-art tone-${index%3+1}`}><span>{product.name.slice(0,1)}</span></div>}<div><h3>{product.name}</h3><p>{product.description}</p><strong>{money(product.price)}</strong></div></article>)}</section></div>}
-  {tab==="appointments"&&<div className="screen"><PageTitle title={session.role==="barber"?"יומן התורים":"התורים שלי"} subtitle={session.role==="barber"?"קביעה וביטול של כל תור ביומן":"צפייה וביטול תורים"} onBack={()=>openTab("home")}/><section className="appointments-list">{session.role==="barber"&&<button className="black-button wide barber-booking-button" onClick={()=>setBookingOpen(true)}>＋ קביעת תור עבור לקוח</button>}{appointments.length?appointments.map(item=><article className={`appointment-card ${item.status}`} key={item.id}><div className="appointment-date"><b>{item.time}</b><small>{item.date}</small></div><div><h3>{item.service}</h3><p>{session.role==="barber"?`${item.clientName||"לקוח"} · ${item.clientPhone}`:item.status==="cancelled"?"התור בוטל":"התור נקבע ביומן"}</p></div><div className="appointment-actions"><button onClick={()=>cancelAppointment(item)} disabled={item.status==="cancelled"}>ביטול</button></div></article>):<div className="empty-state"><span>◷</span><h2>אין תורים כרגע</h2><button className="black-button" onClick={()=>setBookingOpen(true)}>קביעת תור</button></div>}</section></div>}
+  {tab==="appointments"&&<div className="screen"><PageTitle title={session.role==="barber"?"יומן התורים":"התורים שלי"} subtitle={session.role==="barber"?"קביעה וביטול של כל תור ביומן":"צפייה וביטול תורים"} onBack={()=>openTab("home")}/><section className="appointments-list">{session.role==="barber"&&<button className="black-button wide barber-booking-button" onClick={()=>setBookingOpen(true)}>＋ קביעת תור עבור לקוח</button>}{appointments.length?appointments.map(item=><article className={`appointment-card ${item.status}`} key={item.id}><div className="appointment-date"><b>{item.time}</b><small>{item.date}</small></div><div><h3>{item.service}</h3><p>{session.role==="barber"?`${item.clientName||"לקוח"} · ${item.clientPhone}`:item.status==="cancelled"?"התור בוטל":"התור נקבע ביומן"}</p></div><div className="appointment-actions">{item.status==="confirmed"&&item.date>=todayKey()&&(listedAppointmentIds.has(item.id)?<button disabled>במכרז</button>:<button disabled={swapBusy===item.id} onClick={()=>postSwap(item)}>{swapBusy===item.id?"מעלים...":"למכרז"}</button>)}<button onClick={()=>cancelAppointment(item)} disabled={item.status==="cancelled"}>ביטול</button></div></article>):<div className="empty-state"><span>◷</span><h2>אין תורים כרגע</h2><button className="black-button" onClick={()=>setBookingOpen(true)}>קביעת תור</button></div>}</section></div>}
 
-  <nav className="bottom-nav" aria-label="ניווט ראשי">{(session.role==="barber"?[['home','בית'],['appointments','תורים'],['gallery','גלריה'],['products','מוצרים']]:[['home','בית'],['prices','מחירון'],['appointments','התורים שלי'],['gallery','גלריה']] as [Tab,string][]).map(([key,label])=><button key={key} className={tab===key?"active":""} onClick={()=>openTab(key)}><i>{icons[key]}</i><span>{label}</span></button>)}</nav>
+  {tab==="swaps"&&<div className="screen"><PageTitle title="מתאים לך?" subtitle="לוח החלפות תורים בין לקוחות המספרה" onBack={()=>openTab("home")}/><section className="list-section swap-board">
+   <div className="swap-intro"><strong>איך ההחלפה עובדת?</strong><p>{session.role==="barber"?"אפשר להעלות ללוח תור של כל לקוח בנפרד. לקוח אחר של המספרה שמחפש תור לוקח אותו — השעה נשארת תפוסה ביומן, רק הלקוח מתחלף.":"לא מתאים לכם התור שקבעתם? העלו אותו ללוח. לקוח אחר של המספרה לוקח אותו והתור עובר אליו מיד, בלי לעבור דרך הספר."}</p></div>
+   <button className="black-button wide" onClick={()=>setSwapPickerOpen(true)}>＋ הכנסת תור למכרז</button>
+   {openSwaps.length?openSwaps.map(listing=>{const mine=Boolean(listing.ownerId)&&listing.ownerId===session.uid,busy=swapBusy===listing.id;return <article className={`swap-card ${mine?"mine":""}`} key={listing.id}>
+    <div className="swap-when"><b>{listing.time}</b><small>{swapDateLabel(listing.date)}</small></div>
+    <div className="swap-body"><h3>{listing.service||"תור פנוי"}</h3><p>{mine?"התור שלך ממתין ללוקח":listing.postedBy==="barber"?"פורסם על ידי המספרה":"פורסם על ידי לקוח אחר"}</p></div>
+    <div className="swap-actions">
+     {session.role==="client"&&!mine&&<button className="black-button" disabled={busy} onClick={()=>takeSwap(listing)}>{busy?"מעבירים...":"אני רוצה"}</button>}
+     {(mine||session.role==="barber")&&<button disabled={busy} onClick={()=>removeSwap(listing)}>הסרה</button>}
+    </div>
+   </article>}):<div className="empty-state"><span>⇄</span><h2>אין תורים במכרז כרגע</h2><p>ברגע שלקוח יעלה תור להחלפה הוא יופיע כאן.</p></div>}
+   {takenSwaps.length>0&&<><h3 className="admin-section-h">הוחלפו לאחרונה</h3>{takenSwaps.map(listing=><article className="swap-card done" key={listing.id}><div className="swap-when"><b>{listing.time}</b><small>{swapDateLabel(listing.date)}</small></div><div className="swap-body"><h3>{listing.service||"תור"}</h3><p>התור הוחלף</p></div></article>)}</>}
+  </section></div>}
+
+  <nav className="bottom-nav" aria-label="ניווט ראשי">{((session.role==="barber"?[['home','בית'],['appointments','תורים'],['swaps','מתאים לך?'],['gallery','גלריה'],['products','מוצרים']]:[['home','בית'],['prices','מחירון'],['appointments','התורים שלי'],['swaps','מתאים לך?'],['gallery','גלריה']]) as [Tab,string][]).map(([key,label])=><button key={key} className={tab===key?"active":""} onClick={()=>openTab(key)}><i>{icons[key]}</i><span>{label}</span></button>)}</nav>
 
   {bookingOpen&&<div className="sheet-backdrop" onMouseDown={()=>setBookingOpen(false)}><section className="bottom-sheet booking-calendar" onMouseDown={e=>e.stopPropagation()}><div className="sheet-handle"/><header><div><small>{session.role==="barber"?"קביעת תור בשם לקוח":"בוחרים ונכנסים ליומן"}</small><h2>קביעת תור</h2></div><button onClick={()=>setBookingOpen(false)}>×</button></header><form className="booking-form" onSubmit={sendBooking}>{session.role==="barber"&&<div className="barber-client-fields"><label>שם הלקוח<input name="clientName" placeholder="שם מלא" required/></label><label>טלפון הלקוח<input name="clientPhone" type="tel" inputMode="tel" placeholder="05X-XXXXXXX" required/></label></div>}<label>בחרו שירות<select name="service" required>{prices.map(item=><option key={item.id} value={item.id}>{item.name} · {money(item.price)}</option>)}</select></label><div className="date-strip">{bookingDays.map(day=><button type="button" key={day.key} className={bookingDate===day.key?"selected":""} onClick={()=>{setBookingDate(day.key);setBookingTime("")}}><small>{day.dayName}</small><strong>{day.dateLabel}</strong></button>)}</div><div className="time-grid">{daySlots.map(time=>{const busy=busySlotIds.has(slotId(shopId,bookingDate,time));return <button type="button" key={time} className={`${busy?"busy":"free"} ${bookingTime===time?"selected":""}`} disabled={busy} onClick={()=>setBookingTime(time)}><i/><span>{time}</span><small>{busy?"תפוס":"פנוי"}</small></button>})}</div><button className="black-button wide" type="submit" disabled={!bookingTime}>קביעת התור ביומן</button></form></section></div>}
+
+  {swapPickerOpen&&<div className="sheet-backdrop" onMouseDown={()=>setSwapPickerOpen(false)}><section className="bottom-sheet" onMouseDown={e=>e.stopPropagation()}><div className="sheet-handle"/><header><div><small>{session.role==="barber"?"כל לקוח בנפרד — בוחרים תור ומעלים":"בוחרים איזה תור להעלות להחלפה"}</small><h2>הכנסת תור למכרז</h2></div><button onClick={()=>setSwapPickerOpen(false)}>×</button></header><div className="swap-picker">{swappableAppointments.length?swappableAppointments.map(item=><article className="swap-pick-row" key={item.id}><div><strong>{swapDateLabel(item.date)} · {item.time}</strong><small>{item.service||"תור"}{session.role==="barber"?` · ${item.clientName||"לקוח"} ${item.clientPhone}`:""}</small></div><button className="black-button" disabled={swapBusy===item.id} onClick={()=>postSwap(item)}>{swapBusy===item.id?"מעלים...":"העלאה"}</button></article>):<div className="empty-state"><span>◷</span><h2>אין תורים עתידיים להעלאה</h2><p>אפשר להעלות ללוח רק תור מאושר שטרם הגיע מועדו.</p></div>}</div></section></div>}
 
   {session.role==="barber"&&adminOpen&&<div className="sheet-backdrop admin-backdrop" onMouseDown={()=>setAdminOpen(false)}><section className="admin-panel" onMouseDown={e=>e.stopPropagation()}><header><div><small>אזור ספר · {shopId}</small><h2>ניהול האפליקציה</h2></div><button onClick={()=>setAdminOpen(false)}>×</button></header><nav className="admin-tabs">{([['details','פרטים'],['schedule','שעות'],['prices','מחירון'],['products','מוצרים'],['gallery','תמונות'],['broadcast','תפוצה']] as const).map(([key,label])=><button key={key} className={adminTab===key?"active":""} onClick={()=>setAdminTab(key)}>{label}</button>)}</nav>{adminTab==="details"&&<form className="admin-form" onSubmit={saveDetails}><div className="schedule-note"><strong>קוד המספרה שלך: {barberCode||"יוצר קוד..."}</strong><p>שלח את הקוד הזה ללקוחות חדשים. הם מזינים אותו פעם אחת בהרשמה ונשארים משויכים רק למספרה שלך.</p></div><label>שם העסק<input name="name" defaultValue={business.name} required/></label><label>משפט פתיחה<input name="tagline" defaultValue={business.tagline} required/></label><label>טלפון<input name="phone" defaultValue={business.phone} required/></label><label>מספר WhatsApp עם 972<input name="whatsapp" defaultValue={business.whatsapp} required/></label><label>כתובת לתצוגה<input name="address" defaultValue={business.address} required/></label><label>כתובת לניווט<input name="mapQuery" defaultValue={business.mapQuery} required/></label><label>שעות פעילות<input name="hours" defaultValue={business.hours} required/></label><button className="black-button wide" type="submit">שמירת פרטים</button></form>}{adminTab==="schedule"&&<ScheduleEditor schedule={schedule} setSchedule={setSchedule} onSave={saveSchedule}/>} {adminTab==="prices"&&<EditorList items={prices} setItems={setPricesSynced} kind="price"/>}{adminTab==="products"&&<EditorList items={products} setItems={setProductsSynced} kind="product"/>}{adminTab==="gallery"&&<div className="gallery-editor"><input ref={fileInput} type="file" accept="image/*" multiple hidden onChange={handleImages}/><button className="upload-zone" onClick={()=>fileInput.current?.click()} disabled={gallery.length>=8}><span>＋</span><strong>{gallery.length>=8?"הגלריה מלאה":"בחירת תמונות מהמכשיר"}</strong></button><div className="gallery-thumbs">{gallery.map((image,index)=><div key={index}><img src={image} alt=""/><button onClick={()=>removeGalleryImage(index)}>×</button></div>)}</div></div>}{adminTab==="broadcast"&&<form className="broadcast-form" onSubmit={e=>{e.preventDefault();setToast(`הודעת הדמו הוכנה עבור ${new Set(appointments.map(a=>a.clientPhone)).size} לקוחות`)}}><div className="broadcast-stat"><strong>{new Set(appointments.map(a=>a.clientPhone)).size}</strong><span>לקוחות במספרה הזו</span></div><label>הודעה ללקוחות<textarea name="message" rows={5} required/></label><button className="black-button wide" type="submit">הכנת הודעת תפוצה</button><button className="outline-button wide" type="button" onClick={signOut}>יציאה מחשבון הספר</button></form>}</section></div>}
   {toast&&<div className="toast">{toast}</div>}
