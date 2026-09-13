@@ -52,12 +52,14 @@ service cloud.firestore {
       return activeBarber() && userShopId() == dataShopId(data);
     }
 
-    // The client holding a swap listing: by account, or by the phone the
-    // barber booked the appointment under (such bookings have no clientId).
+    // The client holding a swap listing. An account-owned listing belongs to
+    // that account alone; the phone identifies the holder only of a
+    // barber-booked appointment, which has no account on it.
     function swapHolder(data) {
       return signedIn()
-        && ((data.ownerId != "" && data.ownerId == request.auth.uid)
-          || (data.ownerPhone != "" && data.ownerPhone == userProfile().data.get("phone", "")));
+        && (data.get("ownerId", "") != ""
+          ? data.ownerId == request.auth.uid
+          : (data.get("ownerPhone", "") != "" && data.ownerPhone == userProfile().data.get("phone", "")));
     }
 
     match /barberCodes/{code} {
@@ -163,8 +165,9 @@ service cloud.firestore {
         || (signedIn()
           && belongsToUserShop(resource.data)
           && resource.data.status == "confirmed"
-          && (resource.data.clientId == request.auth.uid
-            || (resource.data.clientPhone != "" && resource.data.clientPhone == userProfile().data.get("phone", "")))
+          && (resource.data.get("clientId", "") != ""
+            ? resource.data.clientId == request.auth.uid
+            : (resource.data.get("clientPhone", "") != "" && resource.data.clientPhone == userProfile().data.get("phone", "")))
           && request.resource.data.status == "confirmed"
           && dataShopId(request.resource.data) == dataShopId(resource.data)
           && request.resource.data.diff(resource.data).affectedKeys()
@@ -250,9 +253,11 @@ service cloud.firestore {
               .hasOnly(["status", "requestedBy", "requestedByPhone", "requestedByEmail", "requestedAt"]))
         );
 
-      // Only the holder or the barber may pull a listing off the board.
+      // Only the barber takes listings off the board. A holder's app may clear
+      // one only as part of cancelling the appointment itself.
       allow delete: if barberOwnsData(resource.data)
-        || swapHolder(resource.data);
+        || (swapHolder(resource.data)
+          && get(/databases/$(database)/documents/appointments/$(appointmentId)).data.status == "cancelled");
     }
 
     match /services/{serviceId} {

@@ -100,8 +100,8 @@ export default function Home(){
  const takenSwaps=useMemo(()=>swaps.filter(item=>item.status==="taken").slice(-5).reverse(),[swaps]);
  const listedAppointmentIds=useMemo(()=>new Set(swaps.filter(item=>item.status!=="taken").map(item=>item.appointmentId)),[swaps]);
  const swapDetail=swapDetailId?openSwaps.find(item=>item.id===swapDetailId)??null:null;
- // The holder is matched by phone too, so a client owns listings the barber booked under their number.
- const ownsSwap=(listing:SwapListing)=>Boolean(session&&((listing.ownerId&&listing.ownerId===session.uid)||(listing.ownerPhone&&listing.ownerPhone===session.phone)));
+ // An account-owned listing belongs to that account only; the phone identifies the holder only when the barber booked it with no account.
+ const ownsSwap=(listing:SwapListing)=>Boolean(session&&(listing.ownerId?listing.ownerId===session.uid:Boolean(listing.ownerPhone)&&listing.ownerPhone===session.phone));
  const swappableAppointments=useMemo(()=>appointments.filter(item=>item.status==="confirmed"&&item.date>=todayKey()&&!listedAppointmentIds.has(item.id)),[appointments,listedAppointmentIds]);
 
  function openTab(next:Tab){setTab(next);window.scrollTo({top:0,behavior:"smooth"})}
@@ -198,8 +198,7 @@ export default function Home(){
   }catch{setToast("לא הצלחנו לאשר את ההחלפה")}finally{setSwapBusy(null)}
  }
  async function removeSwap(listing:SwapListing){
-  if(!session)return;
-  if(session.role==="client"&&!ownsSwap(listing))return;
+  if(!session||session.role!=="barber")return;
   setSwapBusy(listing.id);
   try{await deleteDoc(doc(db,"swaps",listing.id));setSwapDetailId(null);setToast("התור הוסר מהלוח")}
   catch{setToast("לא הצלחנו להסיר את התור מהלוח")}finally{setSwapBusy(null)}
@@ -253,7 +252,8 @@ export default function Home(){
     {requestedByMe&&<><p className="swap-detail-note">הבקשה נשלחה לבעל התור. התור יעבור אליך רק אחרי שיאשר.</p><button disabled={busy} onClick={()=>reopenSwap(listing,"הבקשה בוטלה")}>ביטול הבקשה</button></>}
     {session.role==="client"&&!mine&&requested&&!requestedByMe&&<p className="swap-detail-note">לקוח אחר כבר ביקש את התור הזה וממתין לאישור. אם הבקשה תידחה, התור יחזור להיות פתוח.</p>}
     {manager&&requested&&<><button className="black-button" disabled={busy} onClick={()=>approveSwap(listing)}>{busy?"מעבירים...":"אישור ההחלפה"}</button><button disabled={busy} onClick={()=>reopenSwap(listing,"הבקשה נדחתה והתור חזר ללוח")}>דחיית הבקשה</button></>}
-    {manager&&<button className="swap-remove" disabled={busy} onClick={()=>removeSwap(listing)}>הסרה מהלוח</button>}
+    {session.role==="client"&&mine&&!requested&&<p className="swap-detail-note">התור שלך פתוח לבקשות. כשלקוח אחר יבקש אותו, תוכלו לאשר או לדחות מכאן. להסרת התור מהלוח פנו לספר.</p>}
+    {session.role==="barber"&&<button className="swap-remove" disabled={busy} onClick={()=>removeSwap(listing)}>הסרה מהלוח</button>}
    </div>
   </section></div>})()}
 
