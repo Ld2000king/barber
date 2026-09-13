@@ -2,7 +2,7 @@
 
 import {ChangeEvent,FormEvent,useEffect,useMemo,useRef,useState} from "react";
 import {createUserWithEmailAndPassword,onAuthStateChanged,signInWithEmailAndPassword,signOut as firebaseSignOut} from "firebase/auth";
-import {collection,deleteDoc,doc,getDoc,onSnapshot,query,runTransaction,serverTimestamp,setDoc,where,writeBatch} from "firebase/firestore";
+import {collection,deleteDoc,doc,getDoc,onSnapshot,query,runTransaction,serverTimestamp,setDoc,updateDoc,where,writeBatch} from "firebase/firestore";
 import emailjs from "@emailjs/browser";
 import {auth,db} from "../lib/firebase";
 
@@ -23,7 +23,7 @@ type Appointment={id:string;shopId?:string;clientId?:string;clientName?:string;c
 type WorkDay={enabled:boolean;start:string;end:string;slots:number};
 type Schedule={days:Record<number,WorkDay>;minDuration:number};
 type OccupiedSlot={id:string;shopId?:string;date:string;time:string;status:"booked"};
-type SwapListing={id:string;shopId:string;appointmentId:string;ownerId:string;ownerPhone:string;service:string;date:string;time:string;status:"open"|"taken";postedBy:Role;takenBy?:string;takenAt?:{seconds:number}};
+type SwapListing={id:string;shopId:string;appointmentId:string;ownerId:string;ownerPhone:string;service:string;date:string;time:string;status:"open"|"requested"|"taken";postedBy:Role;requestedBy?:string;requestedByPhone?:string;requestedByEmail?:string;requestedAt?:{seconds:number}|null;takenBy?:string;takenByPhone?:string;takenAt?:{seconds:number}};
 
 const DEFAULT_SHOP_ID="ari-cohen";
 const ADMIN_EMAIL="liavdimri12@gmail.com";
@@ -70,7 +70,7 @@ export default function Home(){
  const [tab,setTab]=useState<Tab>("home"),[adminOpen,setAdminOpen]=useState(false),[bookingOpen,setBookingOpen]=useState(false),[toast,setToast]=useState("");
  const [session,setSession]=useState<Session|null>(null),[isAdmin,setIsAdmin]=useState(false),[roleChoice,setRoleChoice]=useState<Role|null>(null),[appointments,setAppointments]=useState<Appointment[]>([]),[occupiedSlots,setOccupiedSlots]=useState<OccupiedSlot[]>([]);
  const [bookingDate,setBookingDate]=useState(""),[bookingTime,setBookingTime]=useState("");
- const [swaps,setSwaps]=useState<SwapListing[]>([]),[swapPickerOpen,setSwapPickerOpen]=useState(false),[swapBusy,setSwapBusy]=useState<string|null>(null);
+ const [swaps,setSwaps]=useState<SwapListing[]>([]),[swapPickerOpen,setSwapPickerOpen]=useState(false),[swapBusy,setSwapBusy]=useState<string|null>(null),[swapDetailId,setSwapDetailId]=useState<string|null>(null);
  const [authMode,setAuthMode]=useState<"login"|"register">("register"),[authBusy,setAuthBusy]=useState(true),[authErrors,setAuthErrors]=useState<AuthErrors>({});
  const [adminTab,setAdminTab]=useState<"details"|"schedule"|"prices"|"products"|"gallery"|"broadcast">("details");
  const fileInput=useRef<HTMLInputElement>(null);
@@ -96,9 +96,12 @@ export default function Home(){
  const busySlotIds=useMemo(()=>new Set([...occupiedSlots.filter(slot=>slot.shopId===shopId).map(slot=>slot.id),...appointments.filter(item=>item.status!=="cancelled"&&item.shopId===shopId).map(item=>slotId(shopId,item.date,item.time))]),[occupiedSlots,appointments,shopId]);
  useEffect(()=>{if(!bookingOpen)return;const next=bookingDays.find(day=>day.key===bookingDate)??bookingDays[0];setBookingDate(next?.key??"");setBookingTime("")},[bookingOpen,bookingDays,bookingDate]);
 
- const openSwaps=useMemo(()=>swaps.filter(item=>item.status==="open"&&item.date>=todayKey()),[swaps]);
+ const openSwaps=useMemo(()=>swaps.filter(item=>(item.status==="open"||item.status==="requested")&&item.date>=todayKey()),[swaps]);
  const takenSwaps=useMemo(()=>swaps.filter(item=>item.status==="taken").slice(-5).reverse(),[swaps]);
- const listedAppointmentIds=useMemo(()=>new Set(swaps.filter(item=>item.status==="open").map(item=>item.appointmentId)),[swaps]);
+ const listedAppointmentIds=useMemo(()=>new Set(swaps.filter(item=>item.status!=="taken").map(item=>item.appointmentId)),[swaps]);
+ const swapDetail=swapDetailId?openSwaps.find(item=>item.id===swapDetailId)??null:null;
+ // The holder is matched by phone too, so a client owns listings the barber booked under their number.
+ const ownsSwap=(listing:SwapListing)=>Boolean(session&&((listing.ownerId&&listing.ownerId===session.uid)||(listing.ownerPhone&&listing.ownerPhone===session.phone)));
  const swappableAppointments=useMemo(()=>appointments.filter(item=>item.status==="confirmed"&&item.date>=todayKey()&&!listedAppointmentIds.has(item.id)),[appointments,listedAppointmentIds]);
 
  function openTab(next:Tab){setTab(next);window.scrollTo({top:0,behavior:"smooth"})}
@@ -166,21 +169,39 @@ export default function Home(){
    setToast("התור עלה ללוח ההחלפות");
   }catch{setToast("לא הצלחנו להעלות את התור ללוח")}finally{setSwapBusy(null)}
  }
- async function takeSwap(listing:SwapListing){
-  if(!session||session.role!=="client"||listing.ownerId===session.uid)return;
+ async function requestSwap(listing:SwapListing){
+  if(!session||session.role!=="client"||ownsSwap(listing)||listing.status!=="open")return;
+  setSwapBusy(listing.id);
+  try{
+   await updateDoc(doc(db,"swaps",listing.id),{status:"requested",requestedBy:session.uid,requestedByPhone:session.phone,requestedByEmail:session.email,requestedAt:serverTimestamp()});
+   setToast("הבקשה נשלחה — ממתינים לאישור בעל התור");
+  }catch{setToast("לקוח אחר כבר ביקש את התור הזה. נסו תור אחר")}finally{setSwapBusy(null)}
+ }
+ async function reopenSwap(listing:SwapListing,message:string){
+  if(!session||listing.status!=="requested")return;
+  if(session.role==="client"&&!ownsSwap(listing)&&listing.requestedBy!==session.uid)return;
+  setSwapBusy(listing.id);
+  try{await updateDoc(doc(db,"swaps",listing.id),{status:"open",requestedBy:"",requestedByPhone:"",requestedByEmail:"",requestedAt:null});setToast(message)}
+  catch{setToast("לא הצלחנו לעדכן את הבקשה")}finally{setSwapBusy(null)}
+ }
+ async function approveSwap(listing:SwapListing){
+  if(!session||listing.status!=="requested"||!listing.requestedBy)return;
+  if(session.role==="client"&&!ownsSwap(listing))return;
   setSwapBusy(listing.id);
   try{
    const batch=writeBatch(db);
-   batch.update(doc(db,"appointments",listing.appointmentId),{clientId:session.uid,clientName:"",clientPhone:session.phone,clientEmail:session.email,updatedAt:serverTimestamp()});
-   batch.update(doc(db,"swaps",listing.id),{status:"taken",takenBy:session.uid,takenByPhone:session.phone,takenAt:serverTimestamp()});
+   batch.update(doc(db,"appointments",listing.appointmentId),{clientId:listing.requestedBy,clientName:"",clientPhone:listing.requestedByPhone||"",clientEmail:listing.requestedByEmail||"",updatedAt:serverTimestamp()});
+   batch.update(doc(db,"swaps",listing.id),{status:"taken",takenBy:listing.requestedBy,takenByPhone:listing.requestedByPhone||"",takenAt:serverTimestamp()});
    await batch.commit();
-   setToast("התור עבר אליך — אפשר לראות אותו ב״התורים שלי״");
-  }catch{setToast("התור כבר נתפס. בחרו תור אחר מהלוח")}finally{setSwapBusy(null)}
+   setSwapDetailId(null);
+   setToast("ההחלפה אושרה — התור עבר ללקוח שביקש");
+  }catch{setToast("לא הצלחנו לאשר את ההחלפה")}finally{setSwapBusy(null)}
  }
  async function removeSwap(listing:SwapListing){
   if(!session)return;
+  if(session.role==="client"&&!ownsSwap(listing))return;
   setSwapBusy(listing.id);
-  try{await deleteDoc(doc(db,"swaps",listing.id));setToast("התור הוסר מהלוח")}
+  try{await deleteDoc(doc(db,"swaps",listing.id));setSwapDetailId(null);setToast("התור הוסר מהלוח")}
   catch{setToast("לא הצלחנו להסיר את התור מהלוח")}finally{setSwapBusy(null)}
  }
 
@@ -204,15 +225,12 @@ export default function Home(){
   {tab==="appointments"&&<div className="screen"><PageTitle title={session.role==="barber"?"יומן התורים":"התורים שלי"} subtitle={session.role==="barber"?"קביעה וביטול של כל תור ביומן":"צפייה וביטול תורים"} onBack={()=>openTab("home")}/><section className="appointments-list">{session.role==="barber"&&<button className="black-button wide barber-booking-button" onClick={()=>setBookingOpen(true)}>＋ קביעת תור עבור לקוח</button>}{appointments.length?appointments.map(item=><article className={`appointment-card ${item.status}`} key={item.id}><div className="appointment-date"><b>{item.time}</b><small>{item.date}</small></div><div><h3>{item.service}</h3><p>{session.role==="barber"?`${item.clientName||"לקוח"} · ${item.clientPhone}`:item.status==="cancelled"?"התור בוטל":"התור נקבע ביומן"}</p></div><div className="appointment-actions">{item.status==="confirmed"&&item.date>=todayKey()&&(listedAppointmentIds.has(item.id)?<button disabled>במכרז</button>:<button disabled={swapBusy===item.id} onClick={()=>postSwap(item)}>{swapBusy===item.id?"מעלים...":"למכרז"}</button>)}<button onClick={()=>cancelAppointment(item)} disabled={item.status==="cancelled"}>ביטול</button></div></article>):<div className="empty-state"><span>◷</span><h2>אין תורים כרגע</h2><button className="black-button" onClick={()=>setBookingOpen(true)}>קביעת תור</button></div>}</section></div>}
 
   {tab==="swaps"&&<div className="screen"><PageTitle title="מתאים לך?" subtitle="לוח החלפות תורים בין לקוחות המספרה" onBack={()=>openTab("home")}/><section className="list-section swap-board">
-   <div className="swap-intro"><strong>איך ההחלפה עובדת?</strong><p>{session.role==="barber"?"אפשר להעלות ללוח תור של כל לקוח בנפרד. לקוח אחר של המספרה שמחפש תור לוקח אותו — השעה נשארת תפוסה ביומן, רק הלקוח מתחלף.":"לא מתאים לכם התור שקבעתם? העלו אותו ללוח. לקוח אחר של המספרה לוקח אותו והתור עובר אליו מיד, בלי לעבור דרך הספר."}</p></div>
+   <div className="swap-intro"><strong>איך ההחלפה עובדת?</strong><p>{session.role==="barber"?"אפשר להעלות ללוח תור של כל לקוח בנפרד. לקוח אחר של המספרה מבקש אותו, ובעל התור (או את/ה) מאשר — השעה נשארת תפוסה ביומן, רק הלקוח מתחלף.":"לא מתאים לכם התור שקבעתם? העלו אותו ללוח. לקוח אחר לוחץ על התור ומבקש החלפה, ורק אחרי שתאשרו — התור עובר אליו."}</p></div>
    <button className="black-button wide" onClick={()=>setSwapPickerOpen(true)}>＋ הכנסת תור למכרז</button>
-   {openSwaps.length?openSwaps.map(listing=>{const mine=Boolean(listing.ownerId)&&listing.ownerId===session.uid,busy=swapBusy===listing.id;return <article className={`swap-card ${mine?"mine":""}`} key={listing.id}>
+   {openSwaps.length?openSwaps.map(listing=>{const mine=ownsSwap(listing),requested=listing.status==="requested",requestedByMe=requested&&listing.requestedBy===session.uid;return <article className={`swap-card ${mine?"mine":""} ${requested?"requested":""}`} key={listing.id} role="button" tabIndex={0} onClick={()=>setSwapDetailId(listing.id)} onKeyDown={e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();setSwapDetailId(listing.id)}}}>
     <div className="swap-when"><b>{listing.time}</b><small>{swapDateLabel(listing.date)}</small></div>
-    <div className="swap-body"><h3>{listing.service||"תור פנוי"}</h3><p>{mine?"התור שלך ממתין ללוקח":listing.postedBy==="barber"?"פורסם על ידי המספרה":"פורסם על ידי לקוח אחר"}</p></div>
-    <div className="swap-actions">
-     {session.role==="client"&&!mine&&<button className="black-button" disabled={busy} onClick={()=>takeSwap(listing)}>{busy?"מעבירים...":"אני רוצה"}</button>}
-     {(mine||session.role==="barber")&&<button disabled={busy} onClick={()=>removeSwap(listing)}>הסרה</button>}
-    </div>
+    <div className="swap-body"><h3>{listing.service||"תור פנוי"}</h3><p>{mine?(requested?"יש בקשת החלפה — לחצו לאישור":"התור שלך ממתין לבקשה"):requestedByMe?"הבקשה שלך ממתינה לאישור":requested?(session.role==="barber"?"יש בקשת החלפה ממתינה":"ממתין לאישור בקשה של לקוח אחר"):listing.postedBy==="barber"?"פורסם על ידי המספרה":"פורסם על ידי לקוח אחר"}</p></div>
+    <span className="swap-chevron" aria-hidden="true">›</span>
    </article>}):<div className="empty-state"><span>⇄</span><h2>אין תורים במכרז כרגע</h2><p>ברגע שלקוח יעלה תור להחלפה הוא יופיע כאן.</p></div>}
    {takenSwaps.length>0&&<><h3 className="admin-section-h">הוחלפו לאחרונה</h3>{takenSwaps.map(listing=><article className="swap-card done" key={listing.id}><div className="swap-when"><b>{listing.time}</b><small>{swapDateLabel(listing.date)}</small></div><div className="swap-body"><h3>{listing.service||"תור"}</h3><p>התור הוחלף</p></div></article>)}</>}
   </section></div>}
@@ -222,6 +240,22 @@ export default function Home(){
   {bookingOpen&&<div className="sheet-backdrop" onMouseDown={()=>setBookingOpen(false)}><section className="bottom-sheet booking-calendar" onMouseDown={e=>e.stopPropagation()}><div className="sheet-handle"/><header><div><small>{session.role==="barber"?"קביעת תור בשם לקוח":"בוחרים ונכנסים ליומן"}</small><h2>קביעת תור</h2></div><button onClick={()=>setBookingOpen(false)}>×</button></header><form className="booking-form" onSubmit={sendBooking}>{session.role==="barber"&&<div className="barber-client-fields"><label>שם הלקוח<input name="clientName" placeholder="שם מלא" required/></label><label>טלפון הלקוח<input name="clientPhone" type="tel" inputMode="tel" placeholder="05X-XXXXXXX" required/></label></div>}<label>בחרו שירות<select name="service" required>{prices.map(item=><option key={item.id} value={item.id}>{item.name} · {money(item.price)}</option>)}</select></label><div className="date-strip">{bookingDays.map(day=><button type="button" key={day.key} className={bookingDate===day.key?"selected":""} onClick={()=>{setBookingDate(day.key);setBookingTime("")}}><small>{day.dayName}</small><strong>{day.dateLabel}</strong></button>)}</div><div className="time-grid">{daySlots.map(time=>{const busy=busySlotIds.has(slotId(shopId,bookingDate,time));return <button type="button" key={time} className={`${busy?"busy":"free"} ${bookingTime===time?"selected":""}`} disabled={busy} onClick={()=>setBookingTime(time)}><i/><span>{time}</span><small>{busy?"תפוס":"פנוי"}</small></button>})}</div><button className="black-button wide" type="submit" disabled={!bookingTime}>קביעת התור ביומן</button></form></section></div>}
 
   {swapPickerOpen&&<div className="sheet-backdrop" onMouseDown={()=>setSwapPickerOpen(false)}><section className="bottom-sheet" onMouseDown={e=>e.stopPropagation()}><div className="sheet-handle"/><header><div><small>{session.role==="barber"?"כל לקוח בנפרד — בוחרים תור ומעלים":"בוחרים איזה תור להעלות להחלפה"}</small><h2>הכנסת תור למכרז</h2></div><button onClick={()=>setSwapPickerOpen(false)}>×</button></header><div className="swap-picker">{swappableAppointments.length?swappableAppointments.map(item=><article className="swap-pick-row" key={item.id}><div><strong>{swapDateLabel(item.date)} · {item.time}</strong><small>{item.service||"תור"}{session.role==="barber"?` · ${item.clientName||"לקוח"} ${item.clientPhone}`:""}</small></div><button className="black-button" disabled={swapBusy===item.id} onClick={()=>postSwap(item)}>{swapBusy===item.id?"מעלים...":"העלאה"}</button></article>):<div className="empty-state"><span>◷</span><h2>אין תורים עתידיים להעלאה</h2><p>אפשר להעלות ללוח רק תור מאושר שטרם הגיע מועדו.</p></div>}</div></section></div>}
+  {swapDetail&&(()=>{const listing=swapDetail,mine=ownsSwap(listing),manager=mine||session.role==="barber",busy=swapBusy===listing.id,requested=listing.status==="requested",requestedByMe=requested&&listing.requestedBy===session.uid;return <div className="sheet-backdrop" onMouseDown={()=>setSwapDetailId(null)}><section className="bottom-sheet" role="dialog" aria-modal="true" aria-label="פרטי התור" onMouseDown={e=>e.stopPropagation()}><div className="sheet-handle"/><header><div><small>{mine?"התור שלך בלוח":listing.postedBy==="barber"?"פורסם על ידי המספרה":"פורסם על ידי לקוח אחר"}</small><h2>פרטי התור</h2></div><button onClick={()=>setSwapDetailId(null)} aria-label="סגירה">×</button></header>
+   <dl className="swap-detail">
+    <div><dt>שירות</dt><dd>{listing.service||"תור"}</dd></div>
+    <div><dt>יום</dt><dd>{swapDateLabel(listing.date)}</dd></div>
+    <div><dt>שעה</dt><dd>{listing.time}</dd></div>
+    <div><dt>סטטוס</dt><dd>{requested?"ממתין לאישור החלפה":"פתוח לבקשות"}</dd></div>
+    {manager&&requested&&<div><dt>מבקש ההחלפה</dt><dd dir="ltr">{listing.requestedByPhone||"לקוח"}</dd></div>}
+   </dl>
+   <div className="swap-detail-actions">
+    {session.role==="client"&&!mine&&!requested&&<button className="black-button" disabled={busy} onClick={()=>requestSwap(listing)}>{busy?"שולחים...":"בקשת החלפה"}</button>}
+    {requestedByMe&&<><p className="swap-detail-note">הבקשה נשלחה לבעל התור. התור יעבור אליך רק אחרי שיאשר.</p><button disabled={busy} onClick={()=>reopenSwap(listing,"הבקשה בוטלה")}>ביטול הבקשה</button></>}
+    {session.role==="client"&&!mine&&requested&&!requestedByMe&&<p className="swap-detail-note">לקוח אחר כבר ביקש את התור הזה וממתין לאישור. אם הבקשה תידחה, התור יחזור להיות פתוח.</p>}
+    {manager&&requested&&<><button className="black-button" disabled={busy} onClick={()=>approveSwap(listing)}>{busy?"מעבירים...":"אישור ההחלפה"}</button><button disabled={busy} onClick={()=>reopenSwap(listing,"הבקשה נדחתה והתור חזר ללוח")}>דחיית הבקשה</button></>}
+    {manager&&<button className="swap-remove" disabled={busy} onClick={()=>removeSwap(listing)}>הסרה מהלוח</button>}
+   </div>
+  </section></div>})()}
 
   {session.role==="barber"&&adminOpen&&<div className="sheet-backdrop admin-backdrop" onMouseDown={()=>setAdminOpen(false)}><section className="admin-panel" onMouseDown={e=>e.stopPropagation()}><header><div><small>אזור ספר · {shopId}</small><h2>ניהול האפליקציה</h2></div><button onClick={()=>setAdminOpen(false)}>×</button></header><nav className="admin-tabs">{([['details','פרטים'],['schedule','שעות'],['prices','מחירון'],['products','מוצרים'],['gallery','תמונות'],['broadcast','תפוצה']] as const).map(([key,label])=><button key={key} className={adminTab===key?"active":""} onClick={()=>setAdminTab(key)}>{label}</button>)}</nav>{adminTab==="details"&&<form className="admin-form" onSubmit={saveDetails}><div className="schedule-note"><strong>קוד המספרה שלך: {barberCode||"יוצר קוד..."}</strong><p>שלח את הקוד הזה ללקוחות חדשים. הם מזינים אותו פעם אחת בהרשמה ונשארים משויכים רק למספרה שלך.</p></div><label>שם העסק<input name="name" defaultValue={business.name} required/></label><label>משפט פתיחה<input name="tagline" defaultValue={business.tagline} required/></label><label>טלפון<input name="phone" defaultValue={business.phone} required/></label><label>מספר WhatsApp עם 972<input name="whatsapp" defaultValue={business.whatsapp} required/></label><label>כתובת לתצוגה<input name="address" defaultValue={business.address} required/></label><label>כתובת לניווט<input name="mapQuery" defaultValue={business.mapQuery} required/></label><label>שעות פעילות<input name="hours" defaultValue={business.hours} required/></label><button className="black-button wide" type="submit">שמירת פרטים</button></form>}{adminTab==="schedule"&&<ScheduleEditor schedule={schedule} setSchedule={setSchedule} onSave={saveSchedule}/>} {adminTab==="prices"&&<EditorList items={prices} setItems={setPricesSynced} kind="price"/>}{adminTab==="products"&&<EditorList items={products} setItems={setProductsSynced} kind="product"/>}{adminTab==="gallery"&&<div className="gallery-editor"><input ref={fileInput} type="file" accept="image/*" multiple hidden onChange={handleImages}/><button className="upload-zone" onClick={()=>fileInput.current?.click()} disabled={gallery.length>=8}><span>＋</span><strong>{gallery.length>=8?"הגלריה מלאה":"בחירת תמונות מהמכשיר"}</strong></button><div className="gallery-thumbs">{gallery.map((image,index)=><div key={index}><img src={image} alt=""/><button onClick={()=>removeGalleryImage(index)}>×</button></div>)}</div></div>}{adminTab==="broadcast"&&<form className="broadcast-form" onSubmit={e=>{e.preventDefault();setToast(`הודעת הדמו הוכנה עבור ${new Set(appointments.map(a=>a.clientPhone)).size} לקוחות`)}}><div className="broadcast-stat"><strong>{new Set(appointments.map(a=>a.clientPhone)).size}</strong><span>לקוחות במספרה הזו</span></div><label>הודעה ללקוחות<textarea name="message" rows={5} required/></label><button className="black-button wide" type="submit">הכנת הודעת תפוצה</button><button className="outline-button wide" type="button" onClick={signOut}>יציאה מחשבון הספר</button></form>}</section></div>}
   {toast&&<div className="toast">{toast}</div>}

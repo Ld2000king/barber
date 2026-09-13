@@ -106,14 +106,26 @@
 .swap-body{min-width:0}
 .swap-body h3{margin:0;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .swap-body p{margin:3px 0 0;color:var(--muted);font-size:11px}
-.swap-actions{display:flex;flex-direction:column;gap:6px}
-.swap-actions button{min-height:38px;padding:0 14px;border-radius:9px;font-size:12px;font-weight:800;cursor:pointer}
-.swap-actions button:not(.black-button){border:1px solid var(--line);background:#fff;color:var(--ink)}
-.swap-actions button:disabled{opacity:.55;cursor:not-allowed}
+.swap-card[role=button]{cursor:pointer;transition:transform .15s ease,box-shadow .15s ease}
+.swap-card[role=button]:active{transform:scale(.985)}
+.swap-card[role=button]:focus-visible{outline:2px solid var(--steel);outline-offset:2px}
+.swap-card.requested{border-color:var(--steel)}
+.swap-chevron{font-size:26px;line-height:1;color:var(--muted);padding-inline:4px}
+.swap-detail{margin:20px 0 0;border-radius:14px;background:var(--paper);overflow:hidden}
+.swap-detail>div{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:13px 16px;border-bottom:1px solid var(--line)}
+.swap-detail>div:last-child{border-bottom:0}
+.swap-detail dt{color:var(--muted);font-size:13px}
+.swap-detail dd{margin:0;font-weight:700;font-size:14px}
+.swap-detail-actions{display:flex;flex-direction:column;gap:10px;margin-top:20px}
+.swap-detail-actions button{width:100%;min-height:50px;border-radius:12px;font-size:15px;font-weight:800;cursor:pointer}
+.swap-detail-actions button:not(.black-button){border:1px solid var(--line);background:#fff;color:var(--ink)}
+.swap-detail-actions button:disabled{opacity:.55;cursor:not-allowed}
+.swap-detail-actions .swap-remove{color:#a3372f}
+.swap-detail-note{margin:0;padding:12px 14px;border-radius:12px;background:var(--paper);color:var(--muted);font-size:13px;line-height:1.6}
 .swap-picker{display:flex;flex-direction:column;gap:10px;margin-top:22px}
 .swap-pick-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 14px;border-radius:14px;background:var(--paper)}
 .swap-pick-row div{display:flex;flex-direction:column;min-width:0}
 .swap-pick-row strong{font-size:14px}
 .swap-pick-row small{margin-top:3px;color:var(--muted);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .swap-pick-row .black-button{min-height:40px;padding:0 18px;flex:0 0 auto}
-@media(max-width:380px){.swap-card{grid-template-columns:58px minmax(0,1fr) auto;gap:9px;padding:12px}.swap-actions button{padding:0 10px;font-size:11px}}
+@media(max-width:380px){.swap-card{grid-template-columns:58px minmax(0,1fr) auto;gap:9px;padding:12px}}

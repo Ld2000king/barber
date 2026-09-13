@@ -52,6 +52,14 @@ service cloud.firestore {
       return activeBarber() && userShopId() == dataShopId(data);
     }
 
+    // The client holding a swap listing: by account, or by the phone the
+    // barber booked the appointment under (such bookings have no clientId).
+    function swapHolder(data) {
+      return signedIn()
+        && ((data.ownerId != "" && data.ownerId == request.auth.uid)
+          || (data.ownerPhone != "" && data.ownerPhone == userProfile().data.get("phone", "")));
+    }
+
     match /barberCodes/{code} {
       // Shop codes are intentionally readable before login so a new client can
       // resolve the correct shop before creating their account.
@@ -149,20 +157,22 @@ service cloud.firestore {
 
       allow update: if (barberOwnsData(resource.data)
           && dataShopId(request.resource.data) == dataShopId(resource.data))
-        // A client takes over an appointment its owner listed on the swap
-        // board. The slot stays booked, only the client on it changes, so the
-        // swap closes between the two clients without the barber acting.
+        // The holder of a listed appointment approves a pending swap request.
+        // The slot stays booked; the new client must be exactly the requester
+        // on file, and the same batch must close the listing as taken by them.
         || (signedIn()
           && belongsToUserShop(resource.data)
           && resource.data.status == "confirmed"
-          && resource.data.clientId != request.auth.uid
-          && request.resource.data.clientId == request.auth.uid
+          && (resource.data.clientId == request.auth.uid
+            || (resource.data.clientPhone != "" && resource.data.clientPhone == userProfile().data.get("phone", "")))
           && request.resource.data.status == "confirmed"
           && dataShopId(request.resource.data) == dataShopId(resource.data)
           && request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(["clientId", "clientName", "clientPhone", "clientEmail", "updatedAt"])
+          && get(/databases/$(database)/documents/swaps/$(appointmentId)).data.status == "requested"
+          && get(/databases/$(database)/documents/swaps/$(appointmentId)).data.requestedBy == request.resource.data.clientId
           && getAfter(/databases/$(database)/documents/swaps/$(appointmentId)).data.status == "taken"
-          && getAfter(/databases/$(database)/documents/swaps/$(appointmentId)).data.takenBy == request.auth.uid)
+          && getAfter(/databases/$(database)/documents/swaps/$(appointmentId)).data.takenBy == request.resource.data.clientId)
         || (signedIn()
           && resource.data.clientId == request.auth.uid
           && belongsToUserShop(resource.data)
@@ -213,18 +223,36 @@ service cloud.firestore {
             && get(/databases/$(database)/documents/appointments/$(appointmentId)).data.clientId == request.auth.uid)
         );
 
-      // Claiming a listing: anyone else in the shop, and only once.
       allow update: if signedIn()
         && belongsToUserShop(resource.data)
-        && resource.data.status == "open"
-        && resource.data.ownerId != request.auth.uid
-        && request.resource.data.status == "taken"
-        && request.resource.data.takenBy == request.auth.uid
-        && request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(["status", "takenBy", "takenByPhone", "takenAt"]);
+        && (
+          // Another client asks for an open listing. One request at a time;
+          // nothing moves until the holder approves.
+          (resource.data.status == "open"
+            && !swapHolder(resource.data)
+            && request.resource.data.status == "requested"
+            && request.resource.data.requestedBy == request.auth.uid
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(["status", "requestedBy", "requestedByPhone", "requestedByEmail", "requestedAt"]))
+          // The holder or the barber approves; the taker is the requester on file.
+          || ((barberOwnsData(resource.data) || swapHolder(resource.data))
+            && resource.data.status == "requested"
+            && request.resource.data.status == "taken"
+            && request.resource.data.takenBy == resource.data.requestedBy
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(["status", "takenBy", "takenByPhone", "takenAt"]))
+          // The holder or the barber rejects, or the requester withdraws.
+          || ((barberOwnsData(resource.data) || swapHolder(resource.data) || resource.data.requestedBy == request.auth.uid)
+            && resource.data.status == "requested"
+            && request.resource.data.status == "open"
+            && request.resource.data.requestedBy == ""
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(["status", "requestedBy", "requestedByPhone", "requestedByEmail", "requestedAt"]))
+        );
 
+      // Only the holder or the barber may pull a listing off the board.
       allow delete: if barberOwnsData(resource.data)
-        || (signedIn() && resource.data.ownerId == request.auth.uid);
+        || swapHolder(resource.data);
     }
 
     match /services/{serviceId} {
