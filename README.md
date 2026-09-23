@@ -31,3 +31,15 @@ npm run build
 ## הערה על גרסה זו
 
 כל התוכן נשמר רק במכשיר שבו נערך. אין עדיין משתמשים, כניסה לחשבון או סנכרון בין מכשירים. אלה ידרשו Backend או API בגרסה עתידית.
+
+## בדיקות כללי Firestore
+
+הבדיקות ב-`tests/firestore-rules` מריצות את `firestore.rules` מול האמולטור (נדרש Java) ומוודאות שתורים של מספרות שונות לא מתנגשים ושמספרה אחת לא יכולה לחסום, לדרוס או לקחת תור של מספרה אחרת.
+
+```bash
+cd tests/firestore-rules
+npm install
+npm test
+```
+
+אחרי שינוי בכללים יש לפרסם אותם: `firebase deploy --only firestore:rules`.

@@ -2,6 +2,8 @@
 
 # dependencies
 /node_modules
+/tests/firestore-rules/node_modules
+firestore-debug.log
 /.pnp
 .pnp.*
 .yarn/*
