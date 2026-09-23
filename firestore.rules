@@ -52,6 +52,14 @@ service cloud.firestore {
       return activeBarber() && userShopId() == dataShopId(data);
     }
 
+    // The one slot id an appointment or availability doc may use:
+    // "<shopId>__<yyyy-mm-dd>_<hhmm>", the same key the app builds. Because the
+    // shop is part of the key, two shops can book the same hour side by side,
+    // and nobody can reserve an hour under another shop's key.
+    function slotKey(data) {
+      return dataShopId(data) + "__" + data.date + "_" + data.time.replace(":", "");
+    }
+
     // The client holding a swap listing. An account-owned listing belongs to
     // that account alone; the phone identifies the holder only of a
     // barber-booked appointment, which has no account on it.
@@ -87,7 +95,13 @@ service cloud.firestore {
         && request.resource.data.shopId.size() >= 3
         && (request.resource.data.role == "barber"
           ? (request.resource.data.keys().hasAll(["status"])
-            && request.resource.data.status == "pending")
+            && request.resource.data.status == "pending"
+            // The shop id is the one the app derives from this account
+            // ("<name>-<first 6 of uid>"), so no barber can claim another
+            // shop's id and later be approved into its data.
+            && (request.resource.data.shopId == userId[0:6].lower()
+              || request.resource.data.shopId.matches(".*-" + userId[0:6].lower()))
+            && !exists(/databases/$(database)/documents/businesses/$(request.resource.data.shopId)))
           : (request.resource.data.keys().hasAll(["barberCode"])
             && exists(/databases/$(database)/documents/barberCodes/$(request.resource.data.barberCode))
             && get(/databases/$(database)/documents/barberCodes/$(request.resource.data.barberCode)).data.shopId == request.resource.data.shopId));
@@ -149,13 +163,16 @@ service cloud.firestore {
           && resource.data.clientId == request.auth.uid
           && belongsToUserShop(resource.data));
 
-      allow create: if barberOwnsData(request.resource.data)
-        || (signedIn()
-          && request.resource.data.clientId == request.auth.uid
-          && belongsToUserShop(request.resource.data)
-          && request.resource.data.status == "confirmed"
-          && getAfter(/databases/$(database)/documents/availability/$(request.resource.data.slotId)).data.appointmentId == appointmentId
-          && dataShopId(getAfter(/databases/$(database)/documents/availability/$(request.resource.data.slotId)).data) == userShopId());
+      // Every new appointment holds its shop's slot for that date and time,
+      // written in the same batch.
+      allow create: if request.resource.data.slotId == slotKey(request.resource.data)
+        && getAfter(/databases/$(database)/documents/availability/$(request.resource.data.slotId)).data.appointmentId == appointmentId
+        && (barberOwnsData(request.resource.data)
+          || (signedIn()
+            && request.resource.data.clientId == request.auth.uid
+            && belongsToUserShop(request.resource.data)
+            && request.resource.data.status == "confirmed"
+            && dataShopId(getAfter(/databases/$(database)/documents/availability/$(request.resource.data.slotId)).data) == userShopId()));
 
       allow update: if (barberOwnsData(resource.data)
           && dataShopId(request.resource.data) == dataShopId(resource.data))
@@ -191,16 +208,22 @@ service cloud.firestore {
     match /availability/{slotId} {
       allow read: if admin() || (signedIn() && belongsToUserShop(resource.data));
 
-      allow create: if barberOwnsData(request.resource.data)
+      // A slot can only be created under its own shop's key. It is created
+      // once; while it exists the hour is taken, for the barber as well.
+      allow create: if slotId == slotKey(request.resource.data)
+        && (barberOwnsData(request.resource.data)
         || (signedIn()
           && belongsToUserShop(request.resource.data)
           && request.resource.data.status == "booked"
           && getAfter(/databases/$(database)/documents/appointments/$(request.resource.data.appointmentId)).data.clientId == request.auth.uid
           && getAfter(/databases/$(database)/documents/appointments/$(request.resource.data.appointmentId)).data.slotId == slotId
-          && dataShopId(getAfter(/databases/$(database)/documents/appointments/$(request.resource.data.appointmentId)).data) == userShopId());
+          && dataShopId(getAfter(/databases/$(database)/documents/appointments/$(request.resource.data.appointmentId)).data) == userShopId()));
 
       allow update: if barberOwnsData(resource.data)
-        && dataShopId(request.resource.data) == dataShopId(resource.data);
+        && dataShopId(request.resource.data) == dataShopId(resource.data)
+        && request.resource.data.date == resource.data.date
+        && request.resource.data.time == resource.data.time
+        && request.resource.data.appointmentId == resource.data.appointmentId;
 
       allow delete: if barberOwnsData(resource.data)
         || (signedIn()
@@ -217,6 +240,8 @@ service cloud.firestore {
       allow create: if request.resource.data.status == "open"
         && request.resource.data.appointmentId == appointmentId
         && dataShopId(request.resource.data) == userShopId()
+        // The appointment on offer must be from this same shop.
+        && dataShopId(get(/databases/$(database)/documents/appointments/$(appointmentId)).data) == dataShopId(request.resource.data)
         && (
           // The barber may list any appointment in their own shop.
           barberOwnsData(request.resource.data)
