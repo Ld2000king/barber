@@ -42,4 +42,6 @@ npm install
 npm test
 ```
 
+`subscription.test.mjs` בודק את חסימת המנויים: ספר ולקוחות של מספרה בלי מנוי פעיל (`shopAccess/{shopId}.activeUntil`, נכתב ע"י ה-Admin CRM) נחסמים עד לחידוש, בלי מחיקת נתונים.
+
 אחרי שינוי בכללים יש לפרסם אותם: `firebase deploy --only firestore:rules`.

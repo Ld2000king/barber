@@ -32,6 +32,8 @@ beforeEach(async()=>{
   await setDoc(doc(db,"businesses","shop-a"),{shopId:"shop-a"});
   await setDoc(doc(db,"businesses","shop-b"),{shopId:"shop-b"});
   await setDoc(doc(db,"barberCodes","CODEA"),{shopId:"shop-a"});
+  // Both shops have an active subscription (shopAccess is written by the Admin CRM).
+  for(const shopId of ["shop-a","shop-b"])await setDoc(doc(db,"shopAccess",shopId),{shopId,activeUntil:new Date(Date.now()+30*864e5)});
   // An existing confirmed booking in shop B.
   await setDoc(doc(db,"appointments","apptB"),{shopId:"shop-b",clientId:"clientB",clientPhone:"0500000021",date:DATE,time:TIME,slotId:slotId("shop-b",DATE,TIME),status:"confirmed"});
   await setDoc(doc(db,"availability",slotId("shop-b",DATE,TIME)),{shopId:"shop-b",date:DATE,time:TIME,status:"booked",appointmentId:"apptB"});

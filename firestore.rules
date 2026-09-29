@@ -22,10 +22,20 @@ service cloud.firestore {
       return signedIn() && userProfile().data.role == "barber";
     }
 
-    // A barber whose account has been approved and not later suspended.
+    // Subscription gate: the CRM publishes shopAccess/{shopId}.activeUntil when a
+    // subscription is saved. No doc, or the time has passed, means the shop's barber
+    // and clients are locked out until the subscription is renewed. Nothing is deleted.
+    function shopActive(shopId) {
+      return exists(/databases/$(database)/documents/shopAccess/$(shopId))
+        && get(/databases/$(database)/documents/shopAccess/$(shopId)).data.activeUntil > request.time;
+    }
+
+    // A barber whose account has been approved, not later suspended, and whose
+    // shop has an active subscription.
     function activeBarber() {
       return isBarber()
-        && userProfile().data.get("status", "approved") == "approved";
+        && userProfile().data.get("status", "approved") == "approved"
+        && shopActive(userShopId());
     }
 
     function userShopId() {
@@ -41,7 +51,7 @@ service cloud.firestore {
     }
 
     function belongsToUserShop(data) {
-      return signedIn() && userShopId() == dataShopId(data);
+      return signedIn() && userShopId() == dataShopId(data) && shopActive(dataShopId(data));
     }
 
     function barberOwnsShop(shopId) {
@@ -78,6 +88,7 @@ service cloud.firestore {
       allow create: if signedIn()
         && isBarber()
         && userProfile().data.get("status", "approved") == "approved"
+        && shopActive(userShopId())
         && request.resource.data.shopId == userShopId()
         && !exists(/databases/$(database)/documents/barberCodes/$(code));
       allow update: if false;
@@ -135,7 +146,7 @@ service cloud.firestore {
     }
 
     match /businesses/{businessId} {
-      allow read: if admin() || (signedIn() && userShopId() == businessId);
+      allow read: if admin() || (signedIn() && userShopId() == businessId && shopActive(businessId));
       // A shop can only be created once its owning barber account is approved.
       allow create: if barberOwnsShop(businessId)
         && userProfile().data.get("status", "approved") == "approved";
@@ -247,6 +258,7 @@ service cloud.firestore {
           barberOwnsData(request.resource.data)
           // A client may only list an appointment that is theirs.
           || (signedIn()
+            && shopActive(userShopId())
             && request.resource.data.ownerId == request.auth.uid
             && get(/databases/$(database)/documents/appointments/$(appointmentId)).data.clientId == request.auth.uid)
         );
@@ -282,7 +294,15 @@ service cloud.firestore {
       // one only as part of cancelling the appointment itself.
       allow delete: if barberOwnsData(resource.data)
         || (swapHolder(resource.data)
+          && shopActive(dataShopId(resource.data))
           && get(/databases/$(database)/documents/appointments/$(appointmentId)).data.status == "cancelled");
+    }
+
+    // Read-only for the shop's own barber and clients (the app shows the blocked
+    // screen from it); written only by the CRM through the Admin SDK.
+    match /shopAccess/{shopId} {
+      allow read: if admin() || (signedIn() && userShopId() == shopId);
+      allow write: if false;
     }
 
     match /services/{serviceId} {
