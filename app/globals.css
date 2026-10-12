@@ -371,3 +371,68 @@ h1,h2,h3{letter-spacing:-.015em}
 .app-header{grid-template-columns:96px 1fr 96px}
 .admin-console .app-header{grid-template-columns:1fr auto}
 .auth-theme{position:absolute;top:calc(env(safe-area-inset-top) + 16px);left:16px;z-index:5}
+
+/* ==========================================================================
+   Motion — transform and opacity only, strong ease-out curves, short durations.
+   ========================================================================== */
+:root{--ease-out:cubic-bezier(.23,1,.32,1);--ease-drawer:cubic-bezier(.32,.72,0,1)}
+button,[role=button],.quick-actions a,.app-promo a{-webkit-user-select:none;user-select:none}
+
+/* Press: shrinks the moment a finger lands, eases back on release */
+button{transition:transform .16s var(--ease-out),background-color .2s ease,color .2s ease,opacity .2s ease}
+.black-button,.outline-button,.quick-actions a,.quick-actions button,.feature-card,.bottom-nav button,.page-title button,.story-card,.shop-row,.swap-card[role=button],.date-strip button,.time-grid button,.role-card>button,.app-promo a,.theme-toggle{transition:transform .16s var(--ease-out),background-color .2s ease,color .2s ease,opacity .2s ease}
+button:not(:disabled):active,.quick-actions a:active,.app-promo a:active{transform:scale(.96)}
+.black-button:not(:disabled):active,.feature-card:active,.shop-row:active,.swap-card[role=button]:active,.role-card>button:active{transform:scale(.97)}
+.time-grid button.selected,.date-strip button.selected{animation:pick .32s var(--ease-out)}
+@keyframes pick{from{transform:scale(.92)}}
+
+/* Tab bar: the active pill fades in and the icon gives a small lift */
+.bottom-nav .active i{animation:tab-pop .4s var(--ease-out)}
+@keyframes tab-pop{from{transform:translateY(3px) scale(.85)}}
+
+/* Page change: the new screen slides in from the side of the tab that was tapped */
+.screen{animation:screen-forward .34s var(--ease-out)}
+[data-nav=back] .screen{animation-name:screen-back}
+@keyframes screen-forward{from{opacity:0;transform:translateX(-22px)}}
+@keyframes screen-back{from{opacity:0;transform:translateX(22px)}}
+
+/* Lists: cards rise in one after another */
+.list-card,.appointment-card,.swap-card,.kpi-card,.shop-row,.service-row,.product-card,.gallery-photo,.story-card,.swap-pick-row,.workday-row,.editor-row{animation:item-in .42s var(--ease-out) backwards}
+@keyframes item-in{from{opacity:0;transform:translateY(12px)}}
+:is(.list-card,.appointment-card,.swap-card,.kpi-card,.shop-row,.service-row,.product-card,.gallery-photo,.story-card,.swap-pick-row,.workday-row,.editor-row):nth-child(2){animation-delay:40ms}
+:is(.list-card,.appointment-card,.swap-card,.kpi-card,.shop-row,.service-row,.product-card,.gallery-photo,.story-card,.swap-pick-row,.workday-row,.editor-row):nth-child(3){animation-delay:80ms}
+:is(.list-card,.appointment-card,.swap-card,.kpi-card,.shop-row,.service-row,.product-card,.gallery-photo,.story-card,.swap-pick-row,.workday-row,.editor-row):nth-child(4){animation-delay:120ms}
+:is(.list-card,.appointment-card,.swap-card,.kpi-card,.shop-row,.service-row,.product-card,.gallery-photo,.story-card,.swap-pick-row,.workday-row,.editor-row):nth-child(5){animation-delay:160ms}
+:is(.list-card,.appointment-card,.swap-card,.kpi-card,.shop-row,.service-row,.product-card,.gallery-photo,.story-card,.swap-pick-row,.workday-row,.editor-row):nth-child(6){animation-delay:200ms}
+:is(.list-card,.appointment-card,.swap-card,.kpi-card,.shop-row,.service-row,.product-card,.gallery-photo,.story-card,.swap-pick-row,.workday-row,.editor-row):nth-child(n+7){animation-delay:240ms}
+
+/* Home: the photo settles in, the welcome card rises over it */
+.home-screen>.cover{animation:cover-in .7s var(--ease-out)}
+.home-screen>.welcome-card{animation:item-in .5s var(--ease-out) .12s backwards}
+.home-screen>.quick-actions{animation:item-in .5s var(--ease-out) .2s backwards}
+@keyframes cover-in{from{opacity:0;transform:scale(1.04)}}
+
+/* Bottom sheets: slide up on open, back down on close; the dim fades with them */
+.sheet-backdrop{transition:opacity .3s var(--ease-out)}
+.bottom-sheet,.admin-panel{transition:transform .5s var(--ease-drawer)}
+@starting-style{.sheet-backdrop{opacity:0}.bottom-sheet,.admin-panel{transform:translateY(100%)}}
+.sheet-backdrop.closing{opacity:0;pointer-events:none;transition-duration:.26s}
+.sheet-backdrop.closing>.bottom-sheet,.sheet-backdrop.closing>.admin-panel{transform:translateY(100%);transition:transform .26s var(--ease-out)}
+.bottom-sheet,.admin-panel{overscroll-behavior:contain}
+
+/* Toast: rises into place */
+.toast{transition:opacity .3s var(--ease-out),transform .4s var(--ease-out)}
+@starting-style{.toast{opacity:0;transform:translate(-50%,14px) scale(.96)}}
+
+/* Light / dark: icon turns in, the page crossfades */
+.theme-icon{display:block;animation:icon-in .4s var(--ease-out)}
+@keyframes icon-in{from{opacity:0;transform:rotate(-90deg) scale(.6)}}
+::view-transition-old(root),::view-transition-new(root){animation-duration:.3s;animation-timing-function:ease}
+
+/* Reduced motion: no movement, only short fades */
+@keyframes fade-in{from{opacity:0}}
+@media(prefers-reduced-motion:reduce){
+ .screen,.home-screen>.cover,.home-screen>.welcome-card,.home-screen>.quick-actions,.theme-icon,.bottom-nav .active i,.time-grid button.selected,.date-strip button.selected,
+ .list-card,.appointment-card,.swap-card,.kpi-card,.shop-row,.service-row,.product-card,.gallery-photo,.story-card,.swap-pick-row,.workday-row,.editor-row{animation:fade-in .2s ease both!important;animation-delay:0s!important}
+ button:active,.quick-actions a:active,.app-promo a:active{transform:none!important}
+}
