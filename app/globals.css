@@ -153,7 +153,7 @@
 html,body{background:var(--bg)}
 body,.auth-shell{font-family:-apple-system,BlinkMacSystemFont,system-ui,"Rubik","Segoe UI",Arial,sans-serif;color:var(--fg);-webkit-font-smoothing:antialiased}
 h1,h2,h3{letter-spacing:-.015em}
-.app-shell,.auth-shell{background:var(--bg);color:var(--fg);box-shadow:none;padding-bottom:110px}
+.app-shell,.auth-shell{background:var(--bg);color:var(--fg);box-shadow:none;padding-bottom:calc(84px + env(safe-area-inset-bottom,0px))}
 .auth-shell{padding-bottom:56px}
 .screen,.home-screen{background:var(--bg)}
 .home-screen:before,.auth-shell:before,.auth-shell:after,.black-button:after{display:none}
@@ -172,14 +172,14 @@ h1,h2,h3{letter-spacing:-.015em}
 .page-title small{color:var(--sub);font-size:13px;font-weight:600}
 .page-title h1{color:var(--fg);font-size:34px;line-height:1.05;letter-spacing:-.025em;font-weight:800;margin-top:4px}
 
-/* Floating glass tab bar */
-.bottom-nav{bottom:calc(12px + env(safe-area-inset-bottom));width:min(calc(100% - 24px),536px);height:66px;padding:6px;border-radius:33px;background:var(--glass);backdrop-filter:blur(24px) saturate(180%);-webkit-backdrop-filter:blur(24px) saturate(180%);border:.5px solid var(--glass-line);box-shadow:var(--glass-shadow)}
+/* Glass tab bar docked to the bottom edge; content scrolls underneath it */
+.bottom-nav{bottom:0;width:min(100%,560px);height:calc(64px + env(safe-area-inset-bottom,0px));padding:6px 8px calc(6px + env(safe-area-inset-bottom,0px));border-radius:0;background:var(--glass);backdrop-filter:blur(24px) saturate(180%);-webkit-backdrop-filter:blur(24px) saturate(180%);border:0;border-top:.5px solid var(--glass-line);box-shadow:none}
 .bottom-nav button{border-radius:26px;color:var(--sub);gap:3px}
 .bottom-nav i{font-size:20px}
 .bottom-nav span{font-size:10px;font-weight:600}
 .bottom-nav .active{color:var(--acc);background:var(--acc-soft)}
 .bottom-nav .active i{color:var(--acc);text-shadow:none;transform:none}
-@media(min-width:700px){.bottom-nav{bottom:32px;border-radius:33px}}
+@media(min-width:700px){.bottom-nav{bottom:20px;border-radius:0 0 28px 28px}}
 
 /* Buttons: one filled accent, everything else neutral */
 .black-button{background:var(--acc);color:var(--acc-fg);border:0;border-radius:var(--r-btn);min-height:52px;font-weight:700;font-size:17px;box-shadow:0 6px 16px var(--acc-shadow)}
@@ -354,7 +354,7 @@ h1,h2,h3{letter-spacing:-.015em}
 .auth-form-error{background:var(--bad-soft);border:0;color:var(--bad)}
 
 /* Toast */
-.toast{bottom:calc(92px + env(safe-area-inset-bottom));background:var(--glass);color:var(--fg);border:.5px solid var(--glass-line);backdrop-filter:blur(24px) saturate(180%);-webkit-backdrop-filter:blur(24px) saturate(180%);box-shadow:var(--glass-shadow);border-radius:18px;font-weight:600}
+.toast{bottom:calc(80px + env(safe-area-inset-bottom,0px));background:var(--glass);color:var(--fg);border:.5px solid var(--glass-line);backdrop-filter:blur(24px) saturate(180%);-webkit-backdrop-filter:blur(24px) saturate(180%);box-shadow:var(--glass-shadow);border-radius:18px;font-weight:600}
 
 /* Accessibility: solid surfaces when transparency is reduced, strong edges for more contrast */
 @media(prefers-reduced-transparency:reduce){
