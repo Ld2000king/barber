@@ -187,28 +187,28 @@ h1,h2,h3{letter-spacing:-.015em}
 .black-button,.outline-button,.quick-actions a,.quick-actions button,.feature-card,.bottom-nav button,.page-title button,.story-card,.shop-row,.swap-card[role=button],.date-strip button,.time-grid button,.role-card>button,.app-promo a{transition:transform .1s ease-out,filter .1s ease-out}
 .black-button:active,.outline-button:active,.quick-actions a:active,.quick-actions button:active,.feature-card:active,.bottom-nav button:active,.page-title button:active,.story-card:active,.shop-row:active,.swap-card[role=button]:active,.date-strip button:active,.time-grid button:active:not(:disabled),.role-card>button:active,.app-promo a:active{transform:scale(.97);filter:none}
 
-/* Home: photo, then the welcome card over it, then quick actions */
+/* Home: the photo in full, then the welcome card, then the quick actions right under it */
 .home-screen{display:flex;flex-direction:column}
 .home-screen>.cover{order:0}.home-screen>.welcome-card{order:1}.home-screen>.quick-actions{order:2}.home-screen>*{order:3}
 .cover{height:330px;margin:16px 12px 0;border-radius:32px;overflow:hidden;background-color:var(--surface)}
 .cover:after{display:none}
-.welcome-card{position:relative;z-index:2;margin:-178px 26px 0;padding:18px;border-radius:24px;text-align:right;background:var(--glass);backdrop-filter:blur(24px) saturate(180%);-webkit-backdrop-filter:blur(24px) saturate(180%);border:.5px solid var(--glass-line);box-shadow:var(--glass-shadow)}
+.welcome-card{position:relative;z-index:2;margin:14px 16px 0;padding:18px;border-radius:var(--r-card);text-align:right;background:var(--surface);border:0;box-shadow:none}
 .welcome-card h1{font-size:22px;line-height:1.2;margin:0 0 4px;color:var(--fg)}
 .welcome-card p{color:var(--sub);font-size:13px;line-height:1.5;margin:0 0 14px;max-width:none}
 .welcome-card .black-button{width:100%;min-height:46px;font-size:16px}
-.home-screen>.quick-actions{margin-top:30px}
+.home-screen>.quick-actions{margin-top:10px}
 .quick-actions{margin:16px;display:flex;gap:0;background:var(--surface);border-radius:var(--r-card);overflow:hidden}
 .quick-actions a,.quick-actions button{flex:1;padding:14px 4px;gap:5px;font-size:12px;font-weight:600;color:var(--fg)}
 .quick-actions>*+*{border-inline-start:.5px solid var(--sep)}
 .quick-actions i{width:auto;height:auto;background:none;border:0;box-shadow:none;color:var(--acc);font-size:22px}
 .quick-actions span{color:var(--fg)}
 [data-theme=dark] .cover{margin:0;border-radius:0;height:420px}
-[data-theme=dark] .cover:after{display:block;height:60%;background:linear-gradient(transparent,#000)}
-[data-theme=dark] .welcome-card{margin:-190px 20px 0;padding:0;background:none;backdrop-filter:none;-webkit-backdrop-filter:none;border:0;box-shadow:none}
-[data-theme=dark] .welcome-card h1{color:#fff;font-size:34px;letter-spacing:-.025em;line-height:1.05;margin-bottom:6px}
+[data-theme=dark] .cover:after{display:block;height:22%;background:linear-gradient(transparent,#000)}
+[data-theme=dark] .welcome-card{margin:10px 20px 0;padding:0;background:none}
+[data-theme=dark] .welcome-card h1{color:#fff;font-size:28px;letter-spacing:-.025em;line-height:1.05;margin-bottom:6px}
 [data-theme=dark] .welcome-card p{color:rgba(255,255,255,.75)}
 [data-theme=dark] .welcome-card .black-button{min-height:50px}
-[data-theme=dark] .quick-actions{background:none;gap:8px;margin-top:22px}
+[data-theme=dark] .quick-actions{background:none;gap:8px;margin-top:14px}
 [data-theme=dark] .quick-actions>*{background:var(--glass);border:.5px solid var(--glass-line);border-radius:18px}
 [data-theme=dark] .quick-actions>*+*{border-inline-start:.5px solid var(--glass-line)}
 .feature-card{margin:0 16px 22px;border-radius:var(--r-card);background:var(--surface);border:0;box-shadow:none}
