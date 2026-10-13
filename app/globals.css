@@ -190,9 +190,9 @@ h1,h2,h3{letter-spacing:-.015em}
 /* Home: the photo in full, then the welcome card, then the quick actions right under it */
 .home-screen{display:flex;flex-direction:column}
 .home-screen>.cover{order:0}.home-screen>.welcome-card{order:1}.home-screen>.quick-actions{order:2}.home-screen>*{order:3}
-.cover{height:330px;margin:16px 12px 0;border-radius:32px;overflow:hidden;background-color:var(--surface)}
+.cover{height:330px;margin:16px 16px 0;border-radius:28px 28px 0 0;overflow:hidden;background-color:var(--surface)}
 .cover:after{display:none}
-.welcome-card{position:relative;z-index:2;margin:14px 16px 0;padding:18px;border-radius:var(--r-card);text-align:right;background:var(--surface);border:0;box-shadow:none}
+.welcome-card{position:relative;z-index:2;margin:0 16px;padding:18px;border-radius:0 0 28px 28px;text-align:right;background:var(--surface);border:0;box-shadow:none}
 .welcome-card h1{font-size:22px;line-height:1.2;margin:0 0 4px;color:var(--fg)}
 .welcome-card p{color:var(--sub);font-size:13px;line-height:1.5;margin:0 0 14px;max-width:none}
 .welcome-card .black-button{width:100%;min-height:46px;font-size:16px}
@@ -204,7 +204,7 @@ h1,h2,h3{letter-spacing:-.015em}
 .quick-actions span{color:var(--fg)}
 [data-theme=dark] .cover{margin:0;border-radius:0;height:420px}
 [data-theme=dark] .cover:after{display:block;height:22%;background:linear-gradient(transparent,#000)}
-[data-theme=dark] .welcome-card{margin:10px 20px 0;padding:0;background:none}
+[data-theme=dark] .welcome-card{margin:0 20px;padding:0;border-radius:0;background:none}
 [data-theme=dark] .welcome-card h1{color:#fff;font-size:28px;letter-spacing:-.025em;line-height:1.05;margin-bottom:6px}
 [data-theme=dark] .welcome-card p{color:rgba(255,255,255,.75)}
 [data-theme=dark] .welcome-card .black-button{min-height:50px}
