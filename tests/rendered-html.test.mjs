@@ -27,6 +27,6 @@ test("renders the barber PWA shell", async () => {
     /^text\/html\b/i,
   );
   const html = await response.text();
-  assert.match(html, /<title>ARI COHEN \| BARBERS<\/title>/i);
+  assert.match(html, /<title>BARBERS<\/title>/i);
   assert.match(html, /<link[^>]+rel=["']manifest["'][^>]+href=["']\/manifest\.webmanifest["']/i);
 });
