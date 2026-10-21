@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // iOS (Capacitor) generated build output:
+    "dist-ios/**",
+    "ios/**",
   ]),
 ]);
 

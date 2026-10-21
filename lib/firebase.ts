@@ -1,5 +1,5 @@
 import {getApp,getApps,initializeApp} from "firebase/app";
-import {getAuth} from "firebase/auth";
+import {browserLocalPersistence,getAuth,indexedDBLocalPersistence,initializeAuth} from "firebase/auth";
 import {getFirestore} from "firebase/firestore";
 
 const firebaseConfig={
@@ -14,5 +14,13 @@ const firebaseConfig={
 
 const app=getApps().length?getApp():initializeApp(firebaseConfig);
 
-export const auth=getAuth(app);
+// Inside the iOS app (Capacitor) getAuth() can hang, because it loads a web
+// popup/redirect helper iframe that does not work there. Email/password login
+// does not need it, so the native app uses initializeAuth without it.
+// The website keeps using getAuth() exactly as before.
+const isNativeApp=typeof window!=="undefined"&&Boolean((window as {Capacitor?:{isNativePlatform?:()=>boolean}}).Capacitor?.isNativePlatform?.());
+
+export const auth=isNativeApp
+ ?initializeAuth(app,{persistence:[indexedDBLocalPersistence,browserLocalPersistence]})
+ :getAuth(app);
 export const db=getFirestore(app);
