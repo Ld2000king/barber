@@ -10,12 +10,14 @@ export type IntroOptions = {
   onEnter: (role: IntroRole) => void;
 };
 
-type Ball = { x: number; y: number; vx: number; vy: number; r: number; cr: number; c1: string; c2: string; emoji?: string; rot: number; born: number; ph: number; fq: number };
+type Ball = { x: number; y: number; vx: number; vy: number; r: number; cr: number; c1: string; c2: string; emoji?: string; glass?: boolean; rot: number; born: number; ph: number; fq: number };
 
 const PALETTE: [string, string][] = [
   ["#ff6fd8", "#ffd1f3"], ["#7cf05a", "#e2ffcf"], ["#3aa7ff", "#cfeaff"], ["#ffb02e", "#fff0c9"],
   ["#a66bff", "#eadcff"], ["#ff5a5a", "#ffd6d6"], ["#2ee6c8", "#d0fff6"], ["#d6b988", "#fff4e0"],
 ];
+// white, clear glass, black
+const MONO: [string, string][] = [["#e9e6e1", "#ffffff"], ["#ffffff", "#ffffff"], ["#0d1114", "#5a636a"]];
 const EMOJI = ["💈", "✂️", "🪒", "💇‍♂️", "🧔", "✨", "🔥", "💯"];
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 const esc = (s: string) => s.replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]!));
@@ -121,7 +123,7 @@ export function mountBubbleIntro(host: HTMLElement, opts: IntroOptions): () => v
   const EMIT_MS = 2400;
   let emitStart = 0, emitted = 0, total = 0, emitX = 0, emitY = 0, emitR = 0;
   function spawnBalls(x: number, y: number, r: number) {
-    total = W < 400 ? 34 : 42; emitX = x; emitY = y; emitR = r * 0.5;
+    total = W < 400 ? 20 : 24; emitX = x; emitY = y; emitR = r * 0.5;
     emitStart = last = performance.now();
     raf = requestAnimationFrame(physics);
   }
@@ -130,12 +132,14 @@ export function mountBubbleIntro(host: HTMLElement, opts: IntroOptions): () => v
     const k = clamp((now - emitStart) / EMIT_MS, 0, 1), want = Math.round(total * (k * k * 0.6 + k * 0.4));
     while (emitted < want) {
       const i = emitted++, [c1, c2] = PALETTE[i % PALETTE.length], isEmoji = i % 4 === 0;
+      const r = isEmoji ? 15 + Math.random() * 6 : 12 + Math.random() * 26;
+      // Small balls are mostly white, clear glass or black; the big ones keep the colours.
+      const mono = !isEmoji && r < 24 && Math.random() < 0.75 ? MONO[Math.floor(Math.random() * MONO.length)] : null;
       const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.2, s = 140 + Math.random() * 260;
       balls.push({
         x: emitX + (Math.random() - 0.5) * emitR, y: emitY + (Math.random() - 0.5) * emitR,
         vx: Math.cos(a) * s, vy: Math.sin(a) * s,
-        r: isEmoji ? 15 + Math.random() * 6 : 12 + Math.random() * 26,
-        c1, c2, rot: Math.random() * 6, emoji: isEmoji ? EMOJI[(i / 4) % EMOJI.length | 0] : undefined,
+        r, c1: mono ? mono[0] : c1, c2: mono ? mono[1] : c2, glass: mono === MONO[1], rot: Math.random() * 6, emoji: isEmoji ? EMOJI[(i / 4) % EMOJI.length | 0] : undefined,
         cr: 2, born: now, ph: Math.random() * Math.PI * 2, fq: 0.6 + Math.random() * 0.8,
       });
     }
@@ -184,6 +188,14 @@ export function mountBubbleIntro(host: HTMLElement, opts: IntroOptions): () => v
         ctx.font = `${R * 1.7}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
         ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(b.emoji, 0, R * 0.08);
         ctx.restore(); continue;
+      }
+      if (b.glass) {
+        const gg = ctx.createRadialGradient(X - R * 0.3, Y - R * 0.35, R * 0.1, X, Y, R);
+        gg.addColorStop(0, "rgba(255,255,255,.55)"); gg.addColorStop(0.7, "rgba(255,255,255,.08)"); gg.addColorStop(1, "rgba(200,215,235,.45)");
+        ctx.beginPath(); ctx.arc(X, Y, R, 0, Math.PI * 2); ctx.fillStyle = gg; ctx.fill();
+        ctx.lineWidth = 1; ctx.strokeStyle = "rgba(140,150,165,.45)"; ctx.stroke();
+        ctx.beginPath(); ctx.ellipse(X - R * 0.32, Y - R * 0.42, R * 0.3, R * 0.16, -0.5, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(255,255,255,.9)"; ctx.fill(); continue;
       }
       const gr = ctx.createRadialGradient(X - R * 0.35, Y - R * 0.4, R * 0.1, X, Y, R);
       gr.addColorStop(0, b.c2); gr.addColorStop(0.55, b.c1); gr.addColorStop(1, shade(b.c1));
