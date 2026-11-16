@@ -133,8 +133,8 @@ export function mountBubbleIntro(host: HTMLElement, opts: IntroOptions): () => v
     while (emitted < want) {
       const i = emitted++, [c1, c2] = PALETTE[i % PALETTE.length], isEmoji = i % 4 === 0;
       const r = isEmoji ? 15 + Math.random() * 6 : 12 + Math.random() * 26;
-      // Small balls are mostly white, clear glass or black; the big ones keep the colours.
-      const mono = !isEmoji && r < 24 && Math.random() < 0.75 ? MONO[Math.floor(Math.random() * MONO.length)] : null;
+      // All balls are white, clear glass or black.
+      const mono = isEmoji ? null : MONO[i % MONO.length];
       const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.2, s = 140 + Math.random() * 260;
       balls.push({
         x: emitX + (Math.random() - 0.5) * emitR, y: emitY + (Math.random() - 0.5) * emitR,
@@ -157,9 +157,9 @@ export function mountBubbleIntro(host: HTMLElement, opts: IntroOptions): () => v
         const grow = clamp((now - b.born) / 600, 0, 1), r = b.r * (0.15 + 0.85 * (1 - (1 - grow) ** 3));
         b.cr = r;
         const lift = b.y > band ? -420 : -420 * (b.y / band) + 220 * (1 - b.y / band);
-        b.vx += Math.sin(secs * b.fq * 1.7 + b.ph) * 320 * h;
-        b.vy += (lift + Math.cos(secs * b.fq * 1.3 + b.ph) * 380) * h;
-        b.vx *= 0.99; b.vy *= 0.99;
+        b.vx += Math.sin(secs * b.fq * 1.7 + b.ph) * 40 * h;
+        b.vy += (lift + Math.cos(secs * b.fq * 1.3 + b.ph) * 50) * h;
+        b.vx *= 0.985; b.vy *= 0.985;
         b.x += b.vx * h; b.y += b.vy * h; b.rot += b.vx * h * 0.01;
         if (b.y - r < 0) { b.y = r; b.vy = Math.abs(b.vy) * 0.6; }
         if (b.x - r < 0) { b.x = r; b.vx = Math.abs(b.vx) * 0.7; }
@@ -182,9 +182,9 @@ export function mountBubbleIntro(host: HTMLElement, opts: IntroOptions): () => v
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
     for (const b of balls) {
-      const R = b.cr, X = b.x, Y = b.y;
+      const R = b.cr, bob = performance.now() / 1000 * b.fq * 2 + b.ph, X = b.x + Math.cos(bob * 0.7) * 2, Y = b.y + Math.sin(bob) * 4;
       if (b.emoji) {
-        ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(b.rot);
+        ctx.save(); ctx.translate(X, Y); ctx.rotate(b.rot);
         ctx.font = `${R * 1.7}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
         ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(b.emoji, 0, R * 0.08);
         ctx.restore(); continue;
