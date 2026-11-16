@@ -22,14 +22,14 @@ const esc = (s: string) => s.replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&l
 
 export function mountBubbleIntro(host: HTMLElement, opts: IntroOptions): () => void {
   const name = esc(opts.name || "BARBERS");
-  const headline = opts.headline ?? "עידן חדש<br/>של תספורת.";
+  const headline = opts.headline ?? 'עידן חדש<br/>של <span class="bi-accent">תספורת.</span>';
   const subtitle = esc(opts.subtitle ?? "תורים, מחירון וגלריה — הכל במקום אחד.");
   const welcome = `<h1 class="bi-head">ברוכים הבאים<br/><em><bdi>${name}.</bdi></em></h1><p class="bi-sub">${subtitle}</p>`;
 
   const root = document.createElement("div");
   root.className = "bi-root";
   root.innerHTML = `
-    <div class="bi-a"><h1 class="bi-head">${headline}</h1></div>
+    <div class="bi-a"><h1 class="bi-head bi-head-a">${headline}</h1></div>
     <div class="bi-b">${welcome}</div>
     <canvas class="bi-balls" aria-hidden="true"></canvas>
     <button type="button" class="bi-bubble" aria-label="כניסה לאפליקציה">
